@@ -756,7 +756,7 @@ def test_compose_auto_shape_writes_agent_md_for_bootcamp(tmp_path, monkeypatch) 
 
 
 def test_compose_agent_scaffold_uses_role_shape_sections(tmp_path, monkeypatch) -> None:
-    """Agent scaffold has Role + Curriculum + Orchestrated skills + When to invoke — not 'How to apply'."""
+    """Agent scaffold has Role + Curriculum + Owned skills + When to invoke + governance sections — not 'How to apply'."""
     monkeypatch.setenv("SKILLMINT_PLAYBOOK_DIR", str(tmp_path))
     _write_curriculum_playbook(
         tmp_path,
@@ -772,7 +772,7 @@ def test_compose_agent_scaffold_uses_role_shape_sections(tmp_path, monkeypatch) 
     body = Path(result["agentPath"]).read_text(encoding="utf-8")
     assert "## Role" in body
     assert "## Curriculum" in body
-    assert "## Orchestrated skills" in body
+    assert "## Owned skills" in body
     assert "## When to invoke this agent" in body
     assert "orchestrating agent" in body.lower()
     # Skill-shaped headings should NOT appear in the agent scaffold
@@ -816,7 +816,7 @@ def test_compose_shape_agent_override_forces_agent_md_even_on_short_video(tmp_pa
     )
     assert result["shape"] == "agent"
     assert result["shapeResolvedFrom"] == "explicit"
-    assert "## Orchestrated skills" in Path(result["agentPath"]).read_text(encoding="utf-8")
+    assert "## Owned skills" in Path(result["agentPath"]).read_text(encoding="utf-8")
 
 
 def test_compose_invalid_shape_raises(tmp_path, monkeypatch) -> None:
@@ -833,7 +833,7 @@ def test_compose_invalid_shape_raises(tmp_path, monkeypatch) -> None:
 
 
 def test_compose_agent_response_mandates_codify_for_orchestration(tmp_path, monkeypatch) -> None:
-    """Agent nextStep references the orchestration stubs, not the 'How to apply' stub."""
+    """Agent nextStep references the new owned-skills + governance stubs, not the 'How to apply' stub."""
     monkeypatch.setenv("SKILLMINT_PLAYBOOK_DIR", str(tmp_path))
     _write_curriculum_playbook(
         tmp_path,
@@ -847,8 +847,10 @@ def test_compose_agent_response_mandates_codify_for_orchestration(tmp_path, monk
         skills_root=str(tmp_path / "project"),
     )
     assert result["shape"] == "agent"
-    assert "Orchestrated skills" in result["nextStep"]
+    assert "Owned skills" in result["nextStep"]
     assert "When to invoke this agent" in result["nextStep"]
+    assert "Constraints" in result["nextStep"]
+    assert "Error handling" in result["nextStep"]
     assert "How to apply" not in result["nextStep"]
     assert "NOT a complete agent" in result["criticalRule"]
 
@@ -869,5 +871,339 @@ def test_compose_agent_description_mentions_orchestration(tmp_path, monkeypatch)
     )
     desc = result["triggerDescription"]
     assert "Orchestrating agent" in desc or "orchestrating agent" in desc.lower()
-    assert "Delegates to specialized skills" in desc
+    # Skill list is NOT hardcoded — must point at the Owned skills section, not name skills
+    assert "Owned skills" in desc
+    assert "sql-tsql" not in desc  # no hardcoded boilerplate
+    assert "python-pandas" not in desc
     assert "become a" in desc.lower()
+
+
+# ---------------------------------------------------------------------------
+# Topic / title stripping (governance audit fix #1)
+# ---------------------------------------------------------------------------
+
+
+def test_topic_strips_year_prefix() -> None:
+    """A title like '2026 Data Analyst Bootcamp' becomes 'Data Analyst'."""
+    assert ss._topic_from_title("2026 Data Analyst Bootcamp") == "Data Analyst"
+
+
+def test_topic_strips_free_decoration() -> None:
+    """The marketing word FREE is stripped wherever it appears."""
+    out = ss._topic_from_title("FREE Python Course for FREE")
+    assert "FREE" not in out
+    assert "Python" in out
+
+
+def test_topic_strips_hours_bracket() -> None:
+    """[24 Hours+] / [24+ Hours] decorations are stripped."""
+    assert "Hours" not in ss._topic_from_title("Data Analyst Bootcamp [24 Hours+]")
+    assert "Hours" not in ss._topic_from_title("Data Analyst Course [24+ Hours]")
+
+
+def test_topic_strips_bootcamp_suffix() -> None:
+    """Role-shape words at the end of a title aren't part of the topic."""
+    assert ss._topic_from_title("Data Analyst Bootcamp") == "Data Analyst"
+    assert ss._topic_from_title("Data Engineer Roadmap") == "Data Engineer"
+
+
+def test_topic_from_real_bootcamp_title_yields_clean_role() -> None:
+    """The real-world bootcamp title strips to 'Data Analyst', not the full marketing string."""
+    title = "2026 FREE Data Analyst Bootcamp [24 Hours+] for FREE | SQL, Excel, Python, Power BI, GitHub, AWS"
+    out = ss._topic_from_title(title)
+    assert out == "Data Analyst", f"expected 'Data Analyst', got: {out!r}"
+
+
+def test_agent_description_uses_cleaned_topic_not_verbose_title(tmp_path, monkeypatch) -> None:
+    """The agent description references the cleaned topic, not the raw verbose title."""
+    monkeypatch.setenv("SKILLMINT_PLAYBOOK_DIR", str(tmp_path))
+    _write_curriculum_playbook(
+        tmp_path,
+        name="clean-topic",
+        title="2026 FREE Data Analyst Bootcamp [24 Hours+] for FREE",
+        section_count=15,
+    )
+    result = ss.compose_skill_scaffold_from_playbook(
+        "clean-topic",
+        skill_name="da-agent-clean",
+        skills_root=str(tmp_path / "project"),
+    )
+    desc = result["triggerDescription"]
+    # The verbose decorations must NOT appear in the description
+    assert "FREE" not in desc
+    assert "Hours+" not in desc
+    assert "2026" not in desc
+    assert "Bootcamp" not in desc
+    # The cleaned topic must appear
+    assert "Data Analyst" in desc
+
+
+# ---------------------------------------------------------------------------
+# Skill governance sections (audit fix #2)
+# ---------------------------------------------------------------------------
+
+
+def test_skill_scaffold_has_typed_io_frontmatter_keys(tmp_path, monkeypatch) -> None:
+    """YAML frontmatter declares inputs / outputs / dependencies as null placeholders."""
+    monkeypatch.setenv("SKILLMINT_PLAYBOOK_DIR", str(tmp_path))
+    _write_playbook(tmp_path, name="govern-skill")
+    result = ss.compose_skill_scaffold_from_playbook(
+        "govern-skill", skill_name="govern", skills_root=str(tmp_path / "project")
+    )
+    body = Path(result["skillPath"]).read_text(encoding="utf-8")
+    # Extract the YAML frontmatter
+    parts = body.split("---", 2)
+    assert len(parts) >= 3, "scaffold must have YAML frontmatter"
+    frontmatter = parts[1]
+    assert "inputs: null" in frontmatter
+    assert "outputs: null" in frontmatter
+    assert "dependencies: null" in frontmatter
+
+
+def test_skill_scaffold_has_inputs_outputs_success_failure_dependencies_sections(tmp_path, monkeypatch) -> None:
+    """Skill scaffold ships with all six governance sections as /codify stubs."""
+    monkeypatch.setenv("SKILLMINT_PLAYBOOK_DIR", str(tmp_path))
+    _write_playbook(tmp_path, name="six-sections")
+    result = ss.compose_skill_scaffold_from_playbook(
+        "six-sections", skill_name="six", skills_root=str(tmp_path / "project")
+    )
+    body = Path(result["skillPath"]).read_text(encoding="utf-8")
+    for heading in (
+        "## Inputs",
+        "## Outputs",
+        "## How to apply",
+        "## Success criteria",
+        "## Failure modes",
+        "## Dependencies",
+    ):
+        assert heading in body, f"missing section: {heading}"
+
+
+def test_skill_scaffold_codify_dependency_is_documented(tmp_path, monkeypatch) -> None:
+    """The Source notes section explicitly names /codify as a Periphery dependency."""
+    monkeypatch.setenv("SKILLMINT_PLAYBOOK_DIR", str(tmp_path))
+    _write_playbook(tmp_path, name="codify-doc")
+    result = ss.compose_skill_scaffold_from_playbook(
+        "codify-doc", skill_name="cdoc", skills_root=str(tmp_path / "project")
+    )
+    body = Path(result["skillPath"]).read_text(encoding="utf-8")
+    assert "Codify dependency" in body
+    assert "Periphery" in body
+
+
+def test_skill_critical_rule_lists_all_stub_sections(tmp_path, monkeypatch) -> None:
+    """criticalRule enumerates the six stub sections that ship as placeholders."""
+    monkeypatch.setenv("SKILLMINT_PLAYBOOK_DIR", str(tmp_path))
+    _write_playbook(tmp_path, name="crit-rule")
+    result = ss.compose_skill_scaffold_from_playbook(
+        "crit-rule", skill_name="cr-skill", skills_root=str(tmp_path / "project")
+    )
+    crit = result["criticalRule"]
+    assert "Six required" in crit
+    assert "Inputs" in crit
+    assert "Outputs" in crit
+    assert "Success criteria" in crit
+    assert "Failure modes" in crit
+    assert "Dependencies" in crit
+
+
+# ---------------------------------------------------------------------------
+# Agent governance sections (audit fix #3)
+# ---------------------------------------------------------------------------
+
+
+def test_agent_scaffold_has_typed_io_frontmatter_keys(tmp_path, monkeypatch) -> None:
+    """Agent YAML frontmatter declares inputs / outputs / owned_skills as null placeholders."""
+    monkeypatch.setenv("SKILLMINT_PLAYBOOK_DIR", str(tmp_path))
+    _write_curriculum_playbook(
+        tmp_path,
+        name="govern-agent",
+        title="Data Engineer Bootcamp",
+        section_count=15,
+    )
+    result = ss.compose_skill_scaffold_from_playbook(
+        "govern-agent", skill_name="ga", skills_root=str(tmp_path / "project")
+    )
+    body = Path(result["agentPath"]).read_text(encoding="utf-8")
+    parts = body.split("---", 2)
+    frontmatter = parts[1]
+    assert "inputs: null" in frontmatter
+    assert "outputs: null" in frontmatter
+    assert "owned_skills: null" in frontmatter
+
+
+def test_agent_scaffold_has_constraints_and_error_handling_sections(tmp_path, monkeypatch) -> None:
+    """Agent scaffold ships with Constraints + Error handling + Inputs + Outputs sections."""
+    monkeypatch.setenv("SKILLMINT_PLAYBOOK_DIR", str(tmp_path))
+    _write_curriculum_playbook(
+        tmp_path,
+        name="agent-gov",
+        title="Data Analyst Bootcamp",
+        section_count=15,
+    )
+    result = ss.compose_skill_scaffold_from_playbook(
+        "agent-gov", skill_name="ag", skills_root=str(tmp_path / "project")
+    )
+    body = Path(result["agentPath"]).read_text(encoding="utf-8")
+    for heading in (
+        "## Inputs",
+        "## Outputs",
+        "## Owned skills",
+        "## When to invoke this agent",
+        "## Constraints",
+        "## Error handling",
+    ):
+        assert heading in body, f"missing agent section: {heading}"
+
+
+def test_agent_owned_skills_section_declares_table_schema(tmp_path, monkeypatch) -> None:
+    """The Owned skills stub includes the required table column schema for /codify to fill."""
+    monkeypatch.setenv("SKILLMINT_PLAYBOOK_DIR", str(tmp_path))
+    _write_curriculum_playbook(
+        tmp_path,
+        name="schema-agent",
+        title="Data Analyst Bootcamp",
+        section_count=12,
+    )
+    result = ss.compose_skill_scaffold_from_playbook(
+        "schema-agent", skill_name="sa", skills_root=str(tmp_path / "project")
+    )
+    body = Path(result["agentPath"]).read_text(encoding="utf-8")
+    # The schema table header declares the contract for /codify
+    assert "| Skill | Curriculum section(s) | When to delegate | Input handoff | Output expected |" in body
+
+
+# ---------------------------------------------------------------------------
+# Workflow shape (audit fix #4 — orchestration document)
+# ---------------------------------------------------------------------------
+
+
+def test_workflow_shape_writes_to_claude_workflows_dir(tmp_path, monkeypatch) -> None:
+    """shape='workflow' lands at .claude/workflows/<slug>.md, not skills/ or agents/."""
+    monkeypatch.setenv("SKILLMINT_PLAYBOOK_DIR", str(tmp_path))
+    _write_playbook(tmp_path, name="wf-pb")
+    result = ss.compose_skill_scaffold_from_playbook(
+        "wf-pb",
+        skill_name="my-workflow",
+        shape="workflow",
+        skills_root=str(tmp_path / "project"),
+    )
+    assert result["shape"] == "workflow"
+    assert result["shapeResolvedFrom"] == "explicit"
+    # workflowPath populated, skillPath and agentPath null
+    assert result["skillPath"] is None
+    assert result["agentPath"] is None
+    wf = Path(result["workflowPath"])
+    assert wf.exists()
+    assert wf.parent.name == "workflows"
+    assert wf.parent.parent.name == ".claude"
+    assert wf.name == "my-workflow.md"
+
+
+def test_workflow_scaffold_has_steps_decision_gates_data_flow_rollback(tmp_path, monkeypatch) -> None:
+    """Workflow scaffold ships with all four orchestration governance sections."""
+    monkeypatch.setenv("SKILLMINT_PLAYBOOK_DIR", str(tmp_path))
+    _write_playbook(tmp_path, name="wf-sections")
+    result = ss.compose_skill_scaffold_from_playbook(
+        "wf-sections", skill_name="wfs", shape="workflow", skills_root=str(tmp_path / "project")
+    )
+    body = Path(result["workflowPath"]).read_text(encoding="utf-8")
+    for heading in (
+        "## Inputs",
+        "## Outputs",
+        "## Steps",
+        "## Decision gates",
+        "## Data flow",
+        "## Rollback",
+        "## Curriculum reference",
+    ):
+        assert heading in body, f"missing workflow section: {heading}"
+
+
+def test_workflow_steps_table_declares_schema(tmp_path, monkeypatch) -> None:
+    """The Steps stub includes the required column schema (# / Skill / Input / Output / Success gate / On failure)."""
+    monkeypatch.setenv("SKILLMINT_PLAYBOOK_DIR", str(tmp_path))
+    _write_playbook(tmp_path, name="wf-schema")
+    result = ss.compose_skill_scaffold_from_playbook(
+        "wf-schema", skill_name="wfsch", shape="workflow", skills_root=str(tmp_path / "project")
+    )
+    body = Path(result["workflowPath"]).read_text(encoding="utf-8")
+    assert "| # | Skill | Input (from) | Output (to) | Success gate | On failure |" in body
+
+
+def test_workflow_owner_agent_passed_through_to_frontmatter(tmp_path, monkeypatch) -> None:
+    """owner_agent='some-agent' lands in the YAML frontmatter."""
+    monkeypatch.setenv("SKILLMINT_PLAYBOOK_DIR", str(tmp_path))
+    _write_playbook(tmp_path, name="wf-owner")
+    result = ss.compose_skill_scaffold_from_playbook(
+        "wf-owner",
+        skill_name="wfowner",
+        shape="workflow",
+        owner_agent="data-analyst",
+        skills_root=str(tmp_path / "project"),
+    )
+    assert result["ownerAgent"] == "data-analyst"
+    body = Path(result["workflowPath"]).read_text(encoding="utf-8")
+    assert "owner_agent: data-analyst" in body
+
+
+def test_workflow_owner_agent_defaults_to_null(tmp_path, monkeypatch) -> None:
+    """Without owner_agent, the frontmatter records `null` and source-notes warn it's unreachable."""
+    monkeypatch.setenv("SKILLMINT_PLAYBOOK_DIR", str(tmp_path))
+    _write_playbook(tmp_path, name="wf-noowner")
+    result = ss.compose_skill_scaffold_from_playbook(
+        "wf-noowner", skill_name="wfno", shape="workflow", skills_root=str(tmp_path / "project")
+    )
+    assert result["ownerAgent"] is None
+    body = Path(result["workflowPath"]).read_text(encoding="utf-8")
+    assert "owner_agent: null" in body
+    assert "unreachable from the agent layer" in body
+
+
+def test_workflow_shape_is_not_auto_selected_by_heuristic(tmp_path, monkeypatch) -> None:
+    """Even a bootcamp-shaped curriculum playbook auto-detects as agent, not workflow."""
+    monkeypatch.setenv("SKILLMINT_PLAYBOOK_DIR", str(tmp_path))
+    _write_curriculum_playbook(
+        tmp_path,
+        name="not-wf",
+        title="Data Analyst Bootcamp Curriculum",
+        section_count=25,
+    )
+    result = ss.compose_skill_scaffold_from_playbook(
+        "not-wf",
+        skill_name="auto-shape",
+        skills_root=str(tmp_path / "project"),
+    )
+    # heuristic picks agent, never workflow
+    assert result["shape"] == "agent"
+
+
+def test_workflow_critical_rule_enumerates_six_stubs(tmp_path, monkeypatch) -> None:
+    """criticalRule for workflows names all six required stub sections."""
+    monkeypatch.setenv("SKILLMINT_PLAYBOOK_DIR", str(tmp_path))
+    _write_playbook(tmp_path, name="wf-crit")
+    result = ss.compose_skill_scaffold_from_playbook(
+        "wf-crit", skill_name="wfc", shape="workflow", skills_root=str(tmp_path / "project")
+    )
+    crit = result["criticalRule"]
+    assert "Inputs" in crit
+    assert "Outputs" in crit
+    assert "Steps" in crit
+    assert "Decision gates" in crit
+    assert "Data flow" in crit
+    assert "Rollback" in crit
+
+
+def test_compose_shape_invalid_rejects_workflow_typo(tmp_path, monkeypatch) -> None:
+    """A bad shape like 'workflows' (plural) is rejected with a clear error listing valid values."""
+    monkeypatch.setenv("SKILLMINT_PLAYBOOK_DIR", str(tmp_path))
+    _write_playbook(tmp_path, name="bad-shape")
+    with pytest.raises(ss.SkillSynthesisError) as exc_info:
+        ss.compose_skill_scaffold_from_playbook(
+            "bad-shape", skill_name="bs", shape="workflows", skills_root=str(tmp_path / "project")
+        )
+    msg = str(exc_info.value)
+    assert "auto" in msg
+    assert "skill" in msg
+    assert "agent" in msg
+    assert "workflow" in msg

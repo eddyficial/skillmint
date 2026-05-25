@@ -458,14 +458,19 @@ def distill_tutorial_playbook_tool(
 @mcp.tool(
     name="compose_skill_scaffold_from_playbook",
     description=(
-        "Compose a Claude Code scaffold from a saved tutorial playbook. The output is either a "
-        "single SKILL.md at .claude/skills/<slug>/ (one procedure, default for short captures) or "
-        "an orchestrating agent .md at .claude/agents/<slug>.md (a role spanning many skills, "
-        "auto-selected for curriculum-shaped captures like 'X Bootcamp' / 'Full Course'). The "
-        "scaffold lists every distilled section as a bullet and stubs out a codify block for the "
-        "current Claude session to fill in via /codify. Pass shape='skill' or shape='agent' to "
-        "override the heuristic. Pass overwrite=true to replace an existing scaffold of the same "
-        "name. Pass scope_notes to attach author-supplied constraints to the source-notes block."
+        "Compose a Claude Code scaffold from a saved tutorial playbook. The output is one of: "
+        "SKILL.md at .claude/skills/<slug>/ (one procedure, default for short captures), an "
+        "orchestrating agent .md at .claude/agents/<slug>.md (a role spanning many skills, "
+        "auto-selected for curriculum-shaped captures like 'X Bootcamp' / 'Full Course'), or a "
+        "workflow .md at .claude/workflows/<slug>.md (an orchestration document with sequenced "
+        "skills, decision gates, data flow, and rollback — opt-in only via shape='workflow'). "
+        "All scaffolds ship with governance section stubs (typed Inputs/Outputs, Success "
+        "criteria, Failure modes, Dependencies for skills; Owned skills, Constraints, Error "
+        "handling for agents; Steps/Decision gates/Data flow/Rollback for workflows) that the "
+        "current Claude session fills in via /codify. Pass shape='skill'|'agent'|'workflow' to "
+        "override the heuristic. Pass owner_agent='<name>' to set the workflow's dispatch entry "
+        "point (workflow shape only; ignored otherwise). Pass overwrite=true to replace an "
+        "existing scaffold. Pass scope_notes to attach author-supplied constraints."
     ),
 )
 def compose_skill_scaffold_from_playbook_tool(
@@ -474,6 +479,7 @@ def compose_skill_scaffold_from_playbook_tool(
     shape: str = "auto",
     trigger_description: str | None = None,
     scope_notes: str | None = None,
+    owner_agent: str | None = None,
     overwrite: bool = False,
     skills_root: str | None = None,
 ) -> str:
@@ -485,6 +491,7 @@ def compose_skill_scaffold_from_playbook_tool(
                 shape=shape,
                 trigger_description=trigger_description,
                 scope_notes=scope_notes,
+                owner_agent=owner_agent,
                 overwrite=overwrite,
                 skills_root=skills_root,
             )
