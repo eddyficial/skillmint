@@ -53,11 +53,21 @@ def _skill_dir(skill_slug: str, *, base: Path | None = None) -> Path:
 
 
 def _mm_ss(seconds: float | int | None) -> str:
-    """Render a seconds value as M:SS for compact section labels."""
+    """Render a seconds value as M:SS, or H:MM:SS when ≥ 1 hour.
+
+    Long-form video (1h+ tutorials, full bootcamps) was rendering as e.g.
+    ``565:51`` (565 minutes) instead of ``9:25:51``. Sections past hour 1
+    became unreadable. Now compact for short clips, full H:MM:SS for long.
+    """
     if seconds is None:
         return "?:??"
     s = int(seconds)
-    return f"{s // 60}:{s % 60:02d}"
+    h = s // 3600
+    m = (s % 3600) // 60
+    sec = s % 60
+    if h > 0:
+        return f"{h}:{m:02d}:{sec:02d}"
+    return f"{m}:{sec:02d}"
 
 
 def _truncate_words(text: str, max_words: int) -> str:
@@ -190,6 +200,9 @@ _STOPWORDS: frozenset[str] = frozenset({
     "were", "they", "them", "then", "there", "here", "each", "few", "most", "other",
     "same", "between", "before", "after", "above", "below", "during", "through",
     "over", "under", "again", "further", "lit", "node", "part", "video", "tutorial",
+    # Tutorial host catchphrases — repeat across every section, useless as topical signal.
+    # ("What's going on everybody? Welcome back to another video. Today...")
+    "everybody", "welcome", "today",
     "lesson", "topic", "intro", "introduction", "overview", "summary", "note", "tip",
     "subscribe", "channel", "thanks", "watching", "watch", "like", "comment", "share",
     "tuned", "stay", "coming", "soon", "hey", "guys", "welcome", "today",
@@ -622,8 +635,25 @@ def compose_skill_scaffold_from_playbook(
         "sectionCount": len(sections),
         "triggerDescription": trigger_description,
         "webWordCount": web_word_count,
+        # nextStep is a hard contract — every successful compose call must be
+        # immediately followed by /codify in the same turn. The scaffold is
+        # NOT a complete skill; the auto-generated description is a default,
+        # the "How to apply" section is a stub, and shipping either as-is is
+        # a known-bad outcome.
         "nextStep": (
-            f"Run `/codify {skill_name}` in a Claude Code session to fill in "
-            "the 'How to apply' section."
+            f"REQUIRED: run `/codify {skill_name}` IMMEDIATELY in this same turn. "
+            f"Read {skill_md_path}, then read the source playbook lessons, then "
+            f"rewrite the YAML `description:` to trigger on natural user phrasing "
+            f"and replace the `## How to apply` stub with a real ordered procedure "
+            f"citing source sections + timestamps. Do not return control to the "
+            f"user until codify is done."
+        ),
+        "criticalRule": (
+            "The returned scaffold is NOT a complete skill. The auto-generated "
+            "`description:` is a triggerable default but verbose; the "
+            "`## How to apply` section is a literal stub. Shipping this scaffold "
+            "as-is means the skill will either fail to trigger on real user "
+            "phrasing OR will trigger and produce nothing useful. /codify is "
+            "atomic with compose — do not skip it, do not defer it."
         ),
     }

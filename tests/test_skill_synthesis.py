@@ -129,6 +129,31 @@ def test_compose_scaffold_writes_skill_md(tmp_path, monkeypatch) -> None:
     assert "## Source notes" in body
 
 
+def test_compose_response_mandates_codify_as_next_step(tmp_path, monkeypatch) -> None:
+    """Every compose response must emit a hard `nextStep` + `criticalRule` telling the caller
+    to run /codify IMMEDIATELY in the same turn — scaffolds shipped as-is have lazy auto-generated
+    descriptions + stub `How to apply` blocks and are functionally useless until codified.
+    """
+    monkeypatch.setenv("SKILLMINT_PLAYBOOK_DIR", str(tmp_path))
+    _write_playbook(tmp_path, name="codify-contract")
+    result = ss.compose_skill_scaffold_from_playbook(
+        "codify-contract",
+        skill_name="codify-contract-skill",
+        skills_root=str(tmp_path / "project"),
+    )
+    # nextStep must explicitly mention codify, the skill name, and "immediately"-class urgency.
+    assert "nextStep" in result
+    step = result["nextStep"]
+    assert "/codify" in step
+    assert "codify-contract-skill" in step
+    assert "IMMEDIATELY" in step or "immediately" in step.lower()
+    # criticalRule must exist and convey that the scaffold is NOT a complete skill.
+    assert "criticalRule" in result
+    rule = result["criticalRule"]
+    assert "NOT a complete skill" in rule or "not a complete skill" in rule.lower()
+    assert "stub" in rule.lower()
+
+
 def test_compose_scaffold_default_trigger_uses_video_title(tmp_path, monkeypatch) -> None:
     """When trigger_description is omitted, the default references the source video title."""
     monkeypatch.setenv("SKILLMINT_PLAYBOOK_DIR", str(tmp_path))
