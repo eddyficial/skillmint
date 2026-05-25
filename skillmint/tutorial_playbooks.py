@@ -9,7 +9,7 @@ re-processing the video.
 
 Storage layout (mirrors learned_playbooks):
 
-    %USERPROFILE%/.periscribe/playbooks/<slug>/
+    %USERPROFILE%/.skillmint/playbooks/<slug>/
       manifest.json    -- name, source URL, video metadata, created_at, step count, summary
       steps.json       -- ordered step records with relative keyframe paths
       transcript.md    -- full transcript across all steps (human-reviewable)
@@ -48,8 +48,8 @@ class TutorialPlaybookError(RuntimeError):
 
 def _store_dir() -> Path:
     """Return the on-disk directory that holds tutorial playbooks, created on demand."""
-    override = os.environ.get("PERISCRIBE_PLAYBOOK_DIR")
-    base = Path(override) if override else Path(os.path.expanduser("~")) / ".periscribe" / "playbooks"
+    override = os.environ.get("SKILLMINT_PLAYBOOK_DIR")
+    base = Path(override) if override else Path(os.path.expanduser("~")) / ".skillmint" / "playbooks"
     base.mkdir(parents=True, exist_ok=True)
     return base
 

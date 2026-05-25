@@ -1,4 +1,4 @@
-"""Tests for periscribe.skill_synthesis (scaffold composition from playbooks).
+"""Tests for skillmint.skill_synthesis (scaffold composition from playbooks).
 
 The tests fully mock the playbook on disk so they don't depend on a captured tutorial.
 """
@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from periscribe import skill_synthesis as ss
+from skillmint import skill_synthesis as ss
 
 
 def _write_playbook(
@@ -57,7 +57,7 @@ def _write_playbook(
 
 def test_compose_scaffold_writes_skill_md(tmp_path, monkeypatch) -> None:
     """Happy path: scaffold lands at .claude/skills/<slug>/SKILL.md with all expected blocks."""
-    monkeypatch.setenv("PERISCRIBE_PLAYBOOK_DIR", str(tmp_path))
+    monkeypatch.setenv("SKILLMINT_PLAYBOOK_DIR", str(tmp_path))
     _write_playbook(tmp_path, name="happy-path")
     result = ss.compose_skill_scaffold_from_playbook(
         "happy-path",
@@ -79,7 +79,7 @@ def test_compose_scaffold_writes_skill_md(tmp_path, monkeypatch) -> None:
 
 def test_compose_scaffold_default_trigger_uses_video_title(tmp_path, monkeypatch) -> None:
     """When trigger_description is omitted, the default references the source video title."""
-    monkeypatch.setenv("PERISCRIBE_PLAYBOOK_DIR", str(tmp_path))
+    monkeypatch.setenv("SKILLMINT_PLAYBOOK_DIR", str(tmp_path))
     _write_playbook(tmp_path, name="trigger-default")
     result = ss.compose_skill_scaffold_from_playbook(
         "trigger-default",
@@ -91,7 +91,7 @@ def test_compose_scaffold_default_trigger_uses_video_title(tmp_path, monkeypatch
 
 def test_compose_scaffold_refuses_to_overwrite_without_flag(tmp_path, monkeypatch) -> None:
     """A second compose call against the same skill name fails unless overwrite=True."""
-    monkeypatch.setenv("PERISCRIBE_PLAYBOOK_DIR", str(tmp_path))
+    monkeypatch.setenv("SKILLMINT_PLAYBOOK_DIR", str(tmp_path))
     _write_playbook(tmp_path, name="pb")
     ss.compose_skill_scaffold_from_playbook(
         "pb", skill_name="taken", skills_root=str(tmp_path / "project")
@@ -109,16 +109,43 @@ def test_compose_scaffold_refuses_to_overwrite_without_flag(tmp_path, monkeypatc
 
 def test_compose_scaffold_rejects_missing_playbook(tmp_path, monkeypatch) -> None:
     """A non-existent playbook surfaces a SkillSynthesisError."""
-    monkeypatch.setenv("PERISCRIBE_PLAYBOOK_DIR", str(tmp_path))
+    monkeypatch.setenv("SKILLMINT_PLAYBOOK_DIR", str(tmp_path))
     with pytest.raises(ss.SkillSynthesisError, match="not found"):
         ss.compose_skill_scaffold_from_playbook(
             "does-not-exist", skill_name="x", skills_root=str(tmp_path / "project")
         )
 
 
+def test_compose_scaffold_skills_root_accepts_dotclaude_suffix(tmp_path, monkeypatch) -> None:
+    """skills_root accepts both a project root AND a path already ending in .claude/skills.
+
+    Both forms must produce the same final SKILL.md path. Without this, callers who pass
+    the literal skills directory get a nested .claude/skills/.claude/skills/<slug>/ path.
+    """
+    monkeypatch.setenv("SKILLMINT_PLAYBOOK_DIR", str(tmp_path))
+    _write_playbook(tmp_path, name="suffix-test")
+    project_root = tmp_path / "project"
+    skills_dir = project_root / ".claude" / "skills"
+
+    # Form 1: project root
+    r1 = ss.compose_skill_scaffold_from_playbook(
+        "suffix-test", skill_name="form-one", skills_root=str(project_root)
+    )
+    # Form 2: .claude/skills path directly
+    r2 = ss.compose_skill_scaffold_from_playbook(
+        "suffix-test", skill_name="form-two", skills_root=str(skills_dir)
+    )
+
+    assert Path(r1["skillPath"]) == skills_dir / "form-one" / "SKILL.md"
+    assert Path(r2["skillPath"]) == skills_dir / "form-two" / "SKILL.md"
+    # Critically: no nested .claude/skills/.claude/skills/ in either path.
+    assert ".claude\\skills\\.claude\\skills" not in r2["skillPath"]
+    assert ".claude/skills/.claude/skills" not in r2["skillPath"]
+
+
 def test_compose_scaffold_rejects_undistilled_playbook(tmp_path, monkeypatch) -> None:
     """If lessons.json is missing the caller is told to distill first."""
-    monkeypatch.setenv("PERISCRIBE_PLAYBOOK_DIR", str(tmp_path))
+    monkeypatch.setenv("SKILLMINT_PLAYBOOK_DIR", str(tmp_path))
     pb = tmp_path / "raw"
     pb.mkdir()
     (pb / "manifest.json").write_text(json.dumps({"name": "raw"}), encoding="utf-8")
@@ -130,7 +157,7 @@ def test_compose_scaffold_rejects_undistilled_playbook(tmp_path, monkeypatch) ->
 
 def test_scope_notes_appear_in_source_notes_block(tmp_path, monkeypatch) -> None:
     """Author-supplied scope notes are rendered verbatim into the source notes block."""
-    monkeypatch.setenv("PERISCRIBE_PLAYBOOK_DIR", str(tmp_path))
+    monkeypatch.setenv("SKILLMINT_PLAYBOOK_DIR", str(tmp_path))
     _write_playbook(tmp_path, name="pb2")
     result = ss.compose_skill_scaffold_from_playbook(
         "pb2",

@@ -24,7 +24,7 @@ import httpx
 import pdfplumber
 from lxml import etree, html as lxml_html
 
-from periscribe.tutorial_playbooks import (
+from skillmint.tutorial_playbooks import (
     TutorialPlaybookError,
     persist_playbook_from_snapshot,
 )
@@ -44,7 +44,7 @@ _WHITESPACE = re.compile(r"[ \t]+")
 _MULTI_NEWLINE = re.compile(r"\n{3,}")
 _HTTP_DEFAULT_TIMEOUT = 30.0
 _HTTP_DEFAULT_USER_AGENT = (
-    "Periscribe/0.1 (+https://periscribe.ai) - tutorial capture for LLM agents"
+    "Skillmint/0.1 (+https://skillmint.ai) - tutorial capture for LLM agents"
 )
 
 

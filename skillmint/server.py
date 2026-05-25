@@ -1,15 +1,15 @@
-"""FastMCP server surface for Periscribe.
+"""FastMCP server surface for Skillmint.
 
-Registers every tool that lives in the periscribe.* modules so a Claude Code
-(or any MCP) client can invoke them as mcp__periscribe__<tool>. The server is
-launched via ``python -m periscribe`` (see __main__.py).
+Registers every tool that lives in the skillmint.* modules so a Claude Code
+(or any MCP) client can invoke them as mcp__skillmint__<tool>. The server is
+launched via ``python -m skillmint`` (see __main__.py).
 
 Naming: each function below mirrors the underlying module function 1:1 with a
 ``_tool`` suffix. The wrapper exists to (a) handle exceptions and (b) shape
 the response into the str/Image-list types FastMCP expects.
 
 House rule (from feedback_periphery_tool_wrappers, carried over): when you add
-a new kwarg to a function in periscribe/<module>.py, ALSO add it here in the
+a new kwarg to a function in skillmint/<module>.py, ALSO add it here in the
 matching ``*_tool`` wrapper — otherwise MCP clients silently see the old
 behavior. Two-file change, always.
 """
@@ -19,7 +19,7 @@ import json
 
 from mcp.server.fastmcp import FastMCP, Image
 
-from periscribe.live_video import (
+from skillmint.live_video import (
     LiveVideoError,
     fetch_youtube_captions,
     follow_youtube_tutorial,
@@ -32,17 +32,17 @@ from periscribe.live_video import (
     youtube_frame_snapshot,
     youtube_watch_status,
 )
-from periscribe.offline_video_capture import capture_youtube_video_to_playbook
-from periscribe.document_capture import (
+from skillmint.offline_video_capture import capture_youtube_video_to_playbook
+from skillmint.document_capture import (
     capture_documentation_site_to_playbook,
     capture_pdf_to_playbook,
     capture_web_page_to_playbook,
 )
-from periscribe.skill_synthesis import (
+from skillmint.skill_synthesis import (
     SkillSynthesisError,
     compose_skill_scaffold_from_playbook,
 )
-from periscribe.tutorial_playbooks import (
+from skillmint.tutorial_playbooks import (
     TutorialPlaybookError,
     delete_tutorial_playbook,
     distill_tutorial_playbook,
@@ -53,7 +53,7 @@ from periscribe.tutorial_playbooks import (
 )
 
 
-mcp = FastMCP("periscribe")
+mcp = FastMCP("skillmint")
 
 
 # ---------------------------------------------------------------------------
@@ -497,7 +497,7 @@ def compose_skill_scaffold_from_playbook_tool(
     name="capture_web_page_to_playbook",
     description=(
         "Fetch a single HTML page, strip nav/footer/script noise, extract the main content, "
-        "split it into heading-based sections, and persist as a Periscribe playbook. Use for "
+        "split it into heading-based sections, and persist as a Skillmint playbook. Use for "
         "setup guides, single-page references, blog tutorials, and other one-URL training "
         "material. The resulting playbook is consumed by distill_tutorial_playbook -> "
         "compose_skill_scaffold_from_playbook -> /codify exactly like a YouTube playbook."
@@ -528,7 +528,7 @@ def capture_web_page_to_playbook_tool(
     name="capture_pdf_to_playbook",
     description=(
         "Extract text from a local PDF (vendor whitepaper, API reference, ebook) and persist "
-        "as a Periscribe playbook with one step per page. Pass page_range as [start, end] to "
+        "as a Skillmint playbook with one step per page. Pass page_range as [start, end] to "
         "slice long PDFs. Does NOT OCR scanned images; if no text comes out, the PDF is "
         "image-only and needs OCR (not implemented). After capture, run distill_tutorial_playbook "
         "to re-group by topic."
@@ -604,7 +604,7 @@ def capture_documentation_site_to_playbook_tool(
 
 
 def main() -> None:
-    """Run the Periscribe MCP server over stdio."""
+    """Run the Skillmint MCP server over stdio."""
     mcp.run()
 
 

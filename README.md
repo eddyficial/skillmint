@@ -1,19 +1,19 @@
-# Periscribe
+# Skillmint
 
 Capture, distill, and codify external knowledge into reusable Claude Code skills.
 
-Periscribe is the **learning loop** in the Periphery family — sibling to [Periphery](https://periphery.ai) (Windows desktop MCP) and the [PeriCode](https://pericode.dev) family (CLI / Inside / Sidecar agent distributions).
+Skillmint is the **learning loop** in the Periphery family — sibling to [Periphery](https://periphery.ai) (Windows desktop MCP) and the [PeriCode](https://pericode.dev) family (CLI / Inside / Sidecar agent distributions).
 
-Where Periphery lets an agent **see and act on** a Windows desktop, Periscribe lets an agent **learn from** external content (YouTube tutorials, PDFs, web docs) and turn that knowledge into permanent capabilities (Claude Code skills, playbooks, trained models).
+Where Periphery lets an agent **see and act on** a Windows desktop, Skillmint lets an agent **learn from** external content (YouTube tutorials, PDFs, web docs) and turn that knowledge into permanent capabilities (Claude Code skills, playbooks, trained models).
 
 ## What it does
 
-Periscribe is an MCP server. It exposes tools that move along this pipeline:
+Skillmint is an MCP server. It exposes tools that move along this pipeline:
 
 ```
 YouTube URL  ─┐
 HTML page    ─┤
-PDF file     ─┼──→  capture_*_to_playbook   →  ~/.periscribe/playbooks/<slug>/
+PDF file     ─┼──→  capture_*_to_playbook   →  ~/.skillmint/playbooks/<slug>/
 Docs site    ─┘                                 (manifest, steps, transcript, optional keyframes)
                           ↓
                  distill_tutorial_playbook   →  lessons.md, lessons.json (cleaned, sectioned)
@@ -26,11 +26,11 @@ Docs site    ─┘                                 (manifest, steps, transcript
                   Any future Claude Code session auto-loads the skill on matching user phrasing
 ```
 
-Four source types, one downstream pipeline. The agent that started the day knowing nothing about Vercel / Power BI / your vendor's API can — after one Periscribe pipeline run — walk a user through doing that thing, citing the source section / page / video timestamp when claims are grounded.
+Four source types, one downstream pipeline. The agent that started the day knowing nothing about Vercel / Power BI / your vendor's API can — after one Skillmint pipeline run — walk a user through doing that thing, citing the source section / page / video timestamp when claims are grounded.
 
 ## Tools
 
-The MCP server registers these tools (all under the `mcp__periscribe__` prefix):
+The MCP server registers these tools (all under the `mcp__skillmint__` prefix):
 
 **Capture — YouTube**
 - `capture_youtube_video_to_playbook(url, name, ...)` — offline-batch capture: yt-dlp downloads, ffmpeg decodes at native speed (~100×+ real-time), keyframe diff produces step events, captions bound per-step by video timestamp. A 4-hour course typically lands in 1–2 minutes.
@@ -62,8 +62,8 @@ The MCP server registers these tools (all under the `mcp__periscribe__` prefix):
 
 ```powershell
 # Clone + venv
-git clone https://github.com/eddyficial/Periscribe.git
-cd Periscribe
+git clone https://github.com/eddyficial/skillmint.git
+cd skillmint
 python -m venv .venv
 .venv\Scripts\Activate.ps1
 pip install -e .[video-transcription]
@@ -80,11 +80,11 @@ Register with your MCP client (Claude Code / Cursor / etc) by adding to `.mcp.js
 ```json
 {
   "mcpServers": {
-    "periscribe": {
+    "skillmint": {
       "type": "stdio",
-      "command": "C:\\path\\to\\Periscribe\\.venv\\Scripts\\python.exe",
-      "args": ["-m", "periscribe"],
-      "cwd": "C:\\path\\to\\Periscribe"
+      "command": "C:\\path\\to\\skillmint\\.venv\\Scripts\\python.exe",
+      "args": ["-m", "skillmint"],
+      "cwd": "C:\\path\\to\\skillmint"
     }
   }
 }
@@ -92,11 +92,11 @@ Register with your MCP client (Claude Code / Cursor / etc) by adding to `.mcp.js
 
 ## Storage
 
-Playbooks land at `~/.periscribe/playbooks/<slug>/` by default. Override with `PERISCRIBE_PLAYBOOK_DIR`.
+Playbooks land at `~/.skillmint/playbooks/<slug>/` by default. Override with `SKILLMINT_PLAYBOOK_DIR`.
 
 Each playbook is a directory. Layout for video sources:
 ```
-~/.periscribe/playbooks/<slug>/
+~/.skillmint/playbooks/<slug>/
 ├── manifest.json          (name, source URL, metadata, step count, summary, sourceKind)
 ├── steps.json             (ordered step records with timestamps, captions, keyframe paths)
 ├── lessons.md             (cleaned prose, sectioned — after distill)
@@ -113,11 +113,11 @@ For HTML / PDF / docs-site sources the `keyframes/` directory is omitted and `tr
 
 - **Windows-first**, Python 3.11+. Cross-platform support is a future goal, not a current contract.
 - **No human-control bypass.** A failed high-level action must not silently fall back to blind raw input. Surface the blocker.
-- **MCP tool wrappers must mirror the underlying function signature.** Adding a kwarg in `periscribe/<module>.py` requires updating the matching `*_tool` wrapper in `periscribe/server.py`, or MCP clients silently see old behavior.
+- **MCP tool wrappers must mirror the underlying function signature.** Adding a kwarg in `skillmint/<module>.py` requires updating the matching `*_tool` wrapper in `skillmint/server.py`, or MCP clients silently see old behavior.
 
 ## Sibling projects
 
-- **[Periphery](https://periphery.ai)** — Windows MCP server for desktop / window / screen / input automation. The "do" to Periscribe's "learn."
+- **[Periphery](https://periphery.ai)** — Windows MCP server for desktop / window / screen / input automation. The "do" to Skillmint's "learn."
 - **PeriCode** — agent distributions: CLI, Inside (in-process SDK), Sidecar (external UIA).
 
 ## License

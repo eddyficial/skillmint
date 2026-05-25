@@ -99,7 +99,7 @@ def capture_youtube_video_to_playbook(
             caption_errors[lang] = str(exc)
             caption_cues_by_lang[lang] = []
 
-    with tempfile.TemporaryDirectory(prefix="periscribe-offline-capture-") as tmpdir:
+    with tempfile.TemporaryDirectory(prefix="skillmint-offline-capture-") as tmpdir:
         download_started = time.monotonic()
         local_path = _download_with_ytdlp(
             url, tmpdir, max_height=max_height, timeout_seconds=download_timeout_seconds

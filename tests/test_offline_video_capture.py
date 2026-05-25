@@ -1,4 +1,4 @@
-"""Tests for periscribe.offline_video_capture (batch VOD download + decode-speed processing).
+"""Tests for skillmint.offline_video_capture (batch VOD download + decode-speed processing).
 
 These tests mock the network/IO boundary (yt-dlp download + ffmpeg subprocess + caption HTTP)
 so they run offline. The keyframe diff and caption-window logic are exercised against
@@ -13,8 +13,8 @@ from typing import Any
 
 import pytest
 
-from periscribe import offline_video_capture as ovc
-from periscribe import live_video, tutorial_playbooks
+from skillmint import offline_video_capture as ovc
+from skillmint import live_video, tutorial_playbooks
 
 
 SAMPLE_METADATA = {
@@ -183,7 +183,7 @@ def test_capture_youtube_video_end_to_end_persists_playbook(monkeypatch, tmp_pat
     payload = red + green + blue
     monkeypatch.setattr(ovc.subprocess, "Popen", lambda *a, **kw: _FakeProc(payload))
     monkeypatch.setattr(ovc, "_require_executable", lambda name: "/fake/ffmpeg")
-    monkeypatch.setenv("PERISCRIBE_PLAYBOOK_DIR", str(tmp_path))
+    monkeypatch.setenv("SKILLMINT_PLAYBOOK_DIR", str(tmp_path))
 
     result = ovc.capture_youtube_video_to_playbook(
         "https://youtu.be/abc123",
