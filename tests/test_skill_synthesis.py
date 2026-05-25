@@ -653,3 +653,221 @@ def test_scope_notes_appear_in_source_notes_block(tmp_path, monkeypatch) -> None
     body = Path(result["skillPath"]).read_text(encoding="utf-8")
     assert "Only run during business hours" in body
     assert "Author scope notes" in body
+
+
+# ---------------------------------------------------------------------------
+# Shape detection: skill vs. agent
+# ---------------------------------------------------------------------------
+
+
+def _write_curriculum_playbook(
+    tmp_path: Path,
+    *,
+    name: str,
+    title: str,
+    section_count: int = 20,
+) -> Path:
+    """Curriculum-shaped playbook: many sections, role-word title.
+
+    Used to exercise the agent-shape detection path.
+    """
+    playbook_dir = tmp_path / name
+    playbook_dir.mkdir(parents=True, exist_ok=True)
+    manifest = {
+        "name": name,
+        "slug": name,
+        "sourceUrl": f"https://youtu.be/{name}",
+        "video": {"title": title, "channel": "tester", "durationSeconds": 28 * 3600},
+        "summary": None,
+    }
+    sections = [
+        {
+            "ordinal": i + 1,
+            "videoStartSeconds": i * 600.0,
+            "videoEndSeconds": (i + 1) * 600.0,
+            "text": f"Module {i + 1} covering SQL, Python, and dashboards.",
+            "anchorKeyframePath": f"keyframes/{i+1:03d}.jpg",
+        }
+        for i in range(section_count)
+    ]
+    lessons = {
+        "name": name,
+        "sourceUrl": manifest["sourceUrl"],
+        "video": manifest["video"],
+        "sectionCount": len(sections),
+        "sections": sections,
+    }
+    (playbook_dir / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    (playbook_dir / "lessons.json").write_text(json.dumps(lessons), encoding="utf-8")
+    return playbook_dir
+
+
+def test_detect_shape_bootcamp_title_with_many_sections_returns_agent() -> None:
+    """A 'Bootcamp' title with >= 10 sections should be detected as an agent."""
+    manifest = {"video": {"title": "2026 FREE Data Analyst Bootcamp [24 Hours+]"}}
+    sections = [{"ordinal": i} for i in range(20)]
+    assert ss._detect_shape(manifest, sections) == "agent"
+
+
+def test_detect_shape_short_video_with_role_word_falls_back_to_skill() -> None:
+    """A short 'X Course in 100 Seconds' is a skill, not an agent — section count blocks it."""
+    manifest = {"video": {"title": "Docker Full Course in 100 Seconds"}}
+    sections = [{"ordinal": i} for i in range(6)]
+    assert ss._detect_shape(manifest, sections) == "skill"
+
+
+def test_detect_shape_no_role_words_returns_skill() -> None:
+    """Even with many sections, a non-role title stays a skill (e.g. uv docs, 25 sections)."""
+    manifest = {"video": {"title": "Getting started | uv"}}
+    sections = [{"ordinal": i} for i in range(25)]
+    assert ss._detect_shape(manifest, sections) == "skill"
+
+
+def test_detect_shape_picks_up_curriculum_keyword() -> None:
+    """The 'curriculum' role-word is enough when section count is high."""
+    manifest = {"video": {"title": "Complete Data Analyst Curriculum 2026"}}
+    sections = [{"ordinal": i} for i in range(15)]
+    assert ss._detect_shape(manifest, sections) == "agent"
+
+
+def test_compose_auto_shape_writes_agent_md_for_bootcamp(tmp_path, monkeypatch) -> None:
+    """A bootcamp playbook composed with shape='auto' lands at .claude/agents/<slug>.md."""
+    monkeypatch.setenv("SKILLMINT_PLAYBOOK_DIR", str(tmp_path))
+    _write_curriculum_playbook(
+        tmp_path,
+        name="da-bootcamp",
+        title="2026 FREE Data Analyst Bootcamp [24 Hours+]",
+        section_count=20,
+    )
+    result = ss.compose_skill_scaffold_from_playbook(
+        "da-bootcamp",
+        skill_name="data-analyst-agent",
+        skills_root=str(tmp_path / "project"),
+    )
+    assert result["shape"] == "agent"
+    assert result["shapeResolvedFrom"] == "heuristic"
+    assert result["skillPath"] is None
+    agent_md = Path(result["agentPath"])
+    assert agent_md.exists()
+    assert agent_md.name == "data-analyst-agent.md"
+    # Lives in .claude/agents/, NOT .claude/skills/<slug>/
+    assert agent_md.parent.name == "agents"
+    assert agent_md.parent.parent.name == ".claude"
+
+
+def test_compose_agent_scaffold_uses_role_shape_sections(tmp_path, monkeypatch) -> None:
+    """Agent scaffold has Role + Curriculum + Orchestrated skills + When to invoke — not 'How to apply'."""
+    monkeypatch.setenv("SKILLMINT_PLAYBOOK_DIR", str(tmp_path))
+    _write_curriculum_playbook(
+        tmp_path,
+        name="agent-shape",
+        title="Become a Data Engineer Roadmap",
+        section_count=15,
+    )
+    result = ss.compose_skill_scaffold_from_playbook(
+        "agent-shape",
+        skill_name="de-agent",
+        skills_root=str(tmp_path / "project"),
+    )
+    body = Path(result["agentPath"]).read_text(encoding="utf-8")
+    assert "## Role" in body
+    assert "## Curriculum" in body
+    assert "## Orchestrated skills" in body
+    assert "## When to invoke this agent" in body
+    assert "orchestrating agent" in body.lower()
+    # Skill-shaped headings should NOT appear in the agent scaffold
+    assert "## How to apply" not in body
+    assert "## What this skill knows" not in body
+
+
+def test_compose_shape_skill_override_forces_skill_md_even_on_bootcamp(tmp_path, monkeypatch) -> None:
+    """shape='skill' overrides the heuristic — even a bootcamp playbook lands as SKILL.md."""
+    monkeypatch.setenv("SKILLMINT_PLAYBOOK_DIR", str(tmp_path))
+    _write_curriculum_playbook(
+        tmp_path,
+        name="force-skill",
+        title="Data Analyst Bootcamp Full Curriculum",
+        section_count=25,
+    )
+    result = ss.compose_skill_scaffold_from_playbook(
+        "force-skill",
+        skill_name="forced-skill",
+        shape="skill",
+        skills_root=str(tmp_path / "project"),
+    )
+    assert result["shape"] == "skill"
+    assert result["shapeResolvedFrom"] == "explicit"
+    assert result["agentPath"] is None
+    skill_md = Path(result["skillPath"])
+    assert skill_md.exists()
+    assert skill_md.name == "SKILL.md"
+    assert "## How to apply" in skill_md.read_text(encoding="utf-8")
+
+
+def test_compose_shape_agent_override_forces_agent_md_even_on_short_video(tmp_path, monkeypatch) -> None:
+    """shape='agent' overrides the heuristic — even a short Fireship video becomes an agent."""
+    monkeypatch.setenv("SKILLMINT_PLAYBOOK_DIR", str(tmp_path))
+    _write_playbook(tmp_path, name="short-vid")
+    result = ss.compose_skill_scaffold_from_playbook(
+        "short-vid",
+        skill_name="forced-agent",
+        shape="agent",
+        skills_root=str(tmp_path / "project"),
+    )
+    assert result["shape"] == "agent"
+    assert result["shapeResolvedFrom"] == "explicit"
+    assert "## Orchestrated skills" in Path(result["agentPath"]).read_text(encoding="utf-8")
+
+
+def test_compose_invalid_shape_raises(tmp_path, monkeypatch) -> None:
+    """Unknown shape value is rejected with a clear error."""
+    monkeypatch.setenv("SKILLMINT_PLAYBOOK_DIR", str(tmp_path))
+    _write_playbook(tmp_path, name="pb-shape")
+    with pytest.raises(ss.SkillSynthesisError, match="invalid shape"):
+        ss.compose_skill_scaffold_from_playbook(
+            "pb-shape",
+            skill_name="bad-shape",
+            shape="orchestrator",
+            skills_root=str(tmp_path / "project"),
+        )
+
+
+def test_compose_agent_response_mandates_codify_for_orchestration(tmp_path, monkeypatch) -> None:
+    """Agent nextStep references the orchestration stubs, not the 'How to apply' stub."""
+    monkeypatch.setenv("SKILLMINT_PLAYBOOK_DIR", str(tmp_path))
+    _write_curriculum_playbook(
+        tmp_path,
+        name="codify-agent",
+        title="Career Switch to Data Analyst Bootcamp",
+        section_count=20,
+    )
+    result = ss.compose_skill_scaffold_from_playbook(
+        "codify-agent",
+        skill_name="career-agent",
+        skills_root=str(tmp_path / "project"),
+    )
+    assert result["shape"] == "agent"
+    assert "Orchestrated skills" in result["nextStep"]
+    assert "When to invoke this agent" in result["nextStep"]
+    assert "How to apply" not in result["nextStep"]
+    assert "NOT a complete agent" in result["criticalRule"]
+
+
+def test_compose_agent_description_mentions_orchestration(tmp_path, monkeypatch) -> None:
+    """Auto-generated agent description names the role-shape, not the procedure-shape."""
+    monkeypatch.setenv("SKILLMINT_PLAYBOOK_DIR", str(tmp_path))
+    _write_curriculum_playbook(
+        tmp_path,
+        name="desc-agent",
+        title="2026 Data Analyst Bootcamp",
+        section_count=15,
+    )
+    result = ss.compose_skill_scaffold_from_playbook(
+        "desc-agent",
+        skill_name="da-agent",
+        skills_root=str(tmp_path / "project"),
+    )
+    desc = result["triggerDescription"]
+    assert "Orchestrating agent" in desc or "orchestrating agent" in desc.lower()
+    assert "Delegates to specialized skills" in desc
+    assert "become a" in desc.lower()

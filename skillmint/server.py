@@ -458,16 +458,20 @@ def distill_tutorial_playbook_tool(
 @mcp.tool(
     name="compose_skill_scaffold_from_playbook",
     description=(
-        "Write a Claude Code SKILL.md scaffold to .claude/skills/<slug>/ derived from a saved "
-        "tutorial playbook. The scaffold lists every distilled section as a bullet (with video "
-        "timestamps) and stubs out a 'How to apply' block for the current Claude session to fill "
-        "in via /codify. Pass overwrite=true to replace an existing skill of the same name. Pass "
-        "scope_notes to attach author-supplied constraints to the source-notes block."
+        "Compose a Claude Code scaffold from a saved tutorial playbook. The output is either a "
+        "single SKILL.md at .claude/skills/<slug>/ (one procedure, default for short captures) or "
+        "an orchestrating agent .md at .claude/agents/<slug>.md (a role spanning many skills, "
+        "auto-selected for curriculum-shaped captures like 'X Bootcamp' / 'Full Course'). The "
+        "scaffold lists every distilled section as a bullet and stubs out a codify block for the "
+        "current Claude session to fill in via /codify. Pass shape='skill' or shape='agent' to "
+        "override the heuristic. Pass overwrite=true to replace an existing scaffold of the same "
+        "name. Pass scope_notes to attach author-supplied constraints to the source-notes block."
     ),
 )
 def compose_skill_scaffold_from_playbook_tool(
     playbook_name: str,
     skill_name: str,
+    shape: str = "auto",
     trigger_description: str | None = None,
     scope_notes: str | None = None,
     overwrite: bool = False,
@@ -478,6 +482,7 @@ def compose_skill_scaffold_from_playbook_tool(
             compose_skill_scaffold_from_playbook(
                 playbook_name,
                 skill_name,
+                shape=shape,
                 trigger_description=trigger_description,
                 scope_notes=scope_notes,
                 overwrite=overwrite,

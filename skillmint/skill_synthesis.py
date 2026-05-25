@@ -33,6 +33,23 @@ _SOURCE_WEB = "web_page"
 _SOURCE_PDF = "pdf"
 _SOURCE_DOCS = "documentation_site"
 
+# Shape constants. A playbook becomes either a single SKILL.md (one procedure)
+# or an orchestrating agent .md (a role that delegates to many existing skills).
+# The heuristic fires on role-words in the title AND breadth (>= threshold
+# sections), so a short "X in 100 Seconds" video doesn't get mis-classified.
+_SHAPE_SKILL = "skill"
+_SHAPE_AGENT = "agent"
+_AGENT_TITLE_PATTERN = re.compile(
+    r"\b("
+    r"bootcamp|masterclass|curriculum|roadmap|syllabus|"
+    r"full\s+course|complete\s+course|complete\s+guide|"
+    r"career|become\s+an?|from\s+zero\s+to|"
+    r"step[\s-]by[\s-]step\s+(?:guide|tutorial)"
+    r")\b",
+    re.IGNORECASE,
+)
+_AGENT_SECTION_THRESHOLD = 10
+
 
 class SkillSynthesisError(RuntimeError):
     """Raised when a skill scaffold cannot be composed."""
@@ -50,6 +67,35 @@ def _skill_dir(skill_slug: str, *, base: Path | None = None) -> Path:
     if len(parts) == 2 and parts[-2] == ".claude" and parts[-1] == "skills":
         return root / skill_slug
     return root / ".claude" / "skills" / skill_slug
+
+
+def _agent_dir(*, base: Path | None = None) -> Path:
+    """Return the directory where agent .md files live.
+
+    Agents are single files at ``.claude/agents/<slug>.md`` (no per-agent
+    subdirectory). ``base`` may be a project root or an existing ``.claude/*``
+    path; the function normalizes either to the project's ``.claude/agents``.
+    """
+    root = base if base is not None else Path.cwd()
+    parts = root.parts[-2:]
+    if len(parts) == 2 and parts[-2] == ".claude" and parts[-1] in ("skills", "agents"):
+        return root.parent / "agents"
+    return root / ".claude" / "agents"
+
+
+def _detect_shape(manifest: dict[str, Any], sections: list[dict[str, Any]]) -> str:
+    """Decide whether a playbook is shaped like a skill or an agent.
+
+    Skill = one procedure, one trigger phrase, one ``SKILL.md``. Agent = a
+    role that orchestrates many specialized skills (e.g. data-analyst spans
+    SQL + Excel + Python + Power BI + Git). The signal is role-words in the
+    source title AND breadth (section count), so a short "X in 100 Seconds"
+    course doesn't get falsely promoted.
+    """
+    title = (manifest.get("video") or {}).get("title") or manifest.get("name") or ""
+    has_role_words = bool(_AGENT_TITLE_PATTERN.search(title))
+    enough_sections = len(sections) >= _AGENT_SECTION_THRESHOLD
+    return _SHAPE_AGENT if (has_role_words and enough_sections) else _SHAPE_SKILL
 
 
 def _mm_ss(seconds: float | int | None) -> str:
@@ -397,6 +443,35 @@ def _generate_trigger_description(
     )
 
 
+def _generate_agent_description(
+    *, manifest: dict[str, Any], sections: list[dict[str, Any]]
+) -> str:
+    """Mechanically derive a triggerable ``description:`` for an agent scaffold.
+
+    Agent descriptions name the role and the topics it orchestrates, then list
+    role-shaped trigger phrases ("become a X", "I want to learn X end-to-end")
+    instead of the procedure-shaped phrases a skill uses.
+    """
+    source_kind = _source_kind(manifest)
+    title = (manifest.get("video") or {}).get("title") or manifest.get("name") or ""
+    topic = _topic_from_title(title)
+    keywords = _keywords(sections, source_kind)
+    kw_str = ", ".join(keywords) if keywords else "concepts from the source curriculum"
+    triggers = [
+        f"become a {topic}",
+        f"learn {topic} end-to-end",
+        f"build a {topic} portfolio",
+        f"what does a {topic} do",
+    ]
+    trigger_str = ", ".join(f"'{t}'" for t in triggers[:3])
+    return (
+        f"Orchestrating agent for end-to-end {topic} work. Covers {kw_str}. "
+        f"Use when the user says {trigger_str}, or hands you a multi-skill {topic} task. "
+        f"Delegates to specialized skills (e.g. sql-tsql, python-pandas, power-bi) per phase. "
+        f"(auto-generated from {source_kind} source; refine via /codify for best matching)"
+    )
+
+
 def _source_block_lines(
     manifest: dict[str, Any], sections: list[dict[str, Any]]
 ) -> list[str]:
@@ -549,26 +624,126 @@ def _render_scaffold_markdown(
     return "\n".join(lines)
 
 
+def _render_agent_scaffold_markdown(
+    *,
+    agent_name: str,
+    playbook_meta: dict[str, Any],
+    sections: list[dict[str, Any]],
+    trigger_description: str,
+    scope_notes: str | None,
+) -> str:
+    """Build the agent .md text from a curriculum-shaped playbook.
+
+    Differs from the skill scaffold: agents orchestrate, they don't do.
+    Sections become a curriculum (what the agent walks the user through),
+    and the codify stubs ask for an orchestration table + invocation rules
+    instead of an ordered procedure.
+    """
+    source_kind = _source_kind(playbook_meta)
+
+    lines: list[str] = [
+        "---",
+        f"name: {agent_name}",
+        f"description: {trigger_description}",
+        "---",
+        "",
+        f"# {agent_name}",
+        "",
+        "## Role",
+        "",
+        (
+            "This is an **orchestrating agent**, not a single-procedure skill. "
+            "It picks the right specialized skill for each phase of a larger "
+            "task and cites the source curriculum for sequencing and "
+            "dependencies."
+        ),
+        "",
+        "## Source playbook",
+        "",
+    ]
+    lines.extend(_source_block_lines(playbook_meta, sections))
+    if playbook_meta.get("summary"):
+        lines.append("")
+        lines.append("**Playbook summary (author-supplied):**")
+        lines.append("")
+        lines.append(str(playbook_meta["summary"]))
+    lines.append("")
+
+    lines.append("## Curriculum")
+    lines.append("")
+    lines.append(
+        f"Distilled from {len(sections)} sections of the source playbook. "
+        "Each row is one topical chunk of the curriculum with its source "
+        "location, so the agent can cite specific lessons when picking "
+        "what to teach or do next."
+    )
+    lines.append("")
+    for section in sections:
+        snippet = _truncate_words((section.get("text") or "").strip(), 30)
+        if not snippet:
+            snippet = "_(no caption text)_"
+        lines.append(f"- **{_section_label(section, source_kind)}** — {snippet}")
+    lines.append("")
+
+    lines.append("## Orchestrated skills")
+    lines.append("")
+    lines.append(
+        f"_(Stub. Run `/codify {agent_name}` to have the current Claude Code "
+        "session read the playbook's lessons.md, identify which existing "
+        "`.claude/skills/*` skills map to which curriculum sections, and "
+        "write the orchestration table — what to invoke and when.)_"
+    )
+    lines.append("")
+
+    lines.append("## When to invoke this agent")
+    lines.append("")
+    lines.append(
+        "_(Stub. `/codify` will replace this with concrete trigger phrases — "
+        "when to delegate to this agent vs. calling a tactical skill "
+        "directly, and what inputs to expect.)_"
+    )
+    lines.append("")
+
+    lines.append("## Source notes")
+    lines.append("")
+    lines.append(
+        "- This agent represents one curriculum author's view of the role. "
+        "Cite the source section when picking what to teach or do next."
+    )
+    if scope_notes:
+        lines.append("- **Author scope notes:** " + scope_notes.strip())
+    lines.append("")
+
+    return "\n".join(lines)
+
+
 def compose_skill_scaffold_from_playbook(
     playbook_name: str,
     skill_name: str,
     *,
+    shape: str = "auto",
     trigger_description: str | None = None,
     scope_notes: str | None = None,
     overwrite: bool = False,
     skills_root: str | None = None,
 ) -> dict[str, Any]:
-    """Write a SKILL.md scaffold derived from a saved tutorial playbook.
+    """Write a SKILL.md or agent .md scaffold derived from a saved playbook.
 
-    The scaffold lists every distilled section as a bullet (with timestamp,
-    page number, or heading depending on source kind) and stubs out a
-    "How to apply" block for the current Claude Code session to fill in
-    via /codify. Returns the on-disk path and metadata about the composed
-    scaffold.
+    ``shape`` is ``"auto"`` (heuristic on title role-words + section count),
+    ``"skill"`` (force single-procedure ``.claude/skills/<slug>/SKILL.md``), or
+    ``"agent"`` (force orchestrating ``.claude/agents/<slug>.md``). The scaffold
+    lists every distilled section as a bullet (with timestamp, page number, or
+    heading depending on source kind) and stubs out a codify block for the
+    current Claude Code session to fill in via /codify. Returns the on-disk
+    path and metadata about the composed scaffold.
     """
     skill_name = (skill_name or "").strip()
     if not skill_name:
         raise SkillSynthesisError("skill_name is required")
+    if shape not in ("auto", _SHAPE_SKILL, _SHAPE_AGENT):
+        raise SkillSynthesisError(
+            f"invalid shape={shape!r}; expected 'auto', 'skill', or 'agent'"
+        )
     target_dir = _playbook_dir(playbook_name)
     manifest_path = target_dir / "manifest.json"
     lessons_path = target_dir / "lessons.json"
@@ -591,31 +766,55 @@ def compose_skill_scaffold_from_playbook(
             "re-distill the playbook"
         )
 
-    if trigger_description is None:
-        trigger_description = _generate_trigger_description(
-            manifest=manifest, sections=sections
-        )
+    resolved_shape = shape if shape != "auto" else _detect_shape(manifest, sections)
+    is_agent = resolved_shape == _SHAPE_AGENT
 
-    skill_slug = _slugify(skill_name)
+    if trigger_description is None:
+        if is_agent:
+            trigger_description = _generate_agent_description(
+                manifest=manifest, sections=sections
+            )
+        else:
+            trigger_description = _generate_trigger_description(
+                manifest=manifest, sections=sections
+            )
+
+    slug = _slugify(skill_name)
     base_root = Path(skills_root) if skills_root else None
-    target = _skill_dir(skill_slug, base=base_root)
-    skill_md_path = target / "SKILL.md"
+
+    if is_agent:
+        agents_root = _agent_dir(base=base_root)
+        output_path = agents_root / f"{slug}.md"
+        output_dir = agents_root
+    else:
+        output_dir = _skill_dir(slug, base=base_root)
+        output_path = output_dir / "SKILL.md"
 
     with _lock:
-        if skill_md_path.exists() and not overwrite:
+        if output_path.exists() and not overwrite:
+            kind_word = "agent" if is_agent else "skill"
             raise SkillSynthesisError(
-                f"skill '{skill_name}' already exists at {skill_md_path}; "
+                f"{kind_word} '{skill_name}' already exists at {output_path}; "
                 "pass overwrite=true to replace it"
             )
-        target.mkdir(parents=True, exist_ok=True)
-        scaffold = _render_scaffold_markdown(
-            skill_name=skill_name,
-            playbook_meta=manifest,
-            sections=sections,
-            trigger_description=trigger_description,
-            scope_notes=scope_notes,
-        )
-        skill_md_path.write_text(scaffold, encoding="utf-8")
+        output_dir.mkdir(parents=True, exist_ok=True)
+        if is_agent:
+            scaffold = _render_agent_scaffold_markdown(
+                agent_name=skill_name,
+                playbook_meta=manifest,
+                sections=sections,
+                trigger_description=trigger_description,
+                scope_notes=scope_notes,
+            )
+        else:
+            scaffold = _render_scaffold_markdown(
+                skill_name=skill_name,
+                playbook_meta=manifest,
+                sections=sections,
+                trigger_description=trigger_description,
+                scope_notes=scope_notes,
+            )
+        output_path.write_text(scaffold, encoding="utf-8")
 
     # For web sources, surface the word count in the response so callers can
     # decide whether to include it elsewhere — the manifest doesn't store it
@@ -624,12 +823,57 @@ def compose_skill_scaffold_from_playbook(
     if _source_kind(manifest) == _SOURCE_WEB:
         web_word_count = sum(int(s.get("wordCount") or 0) for s in sections)
 
+    if is_agent:
+        next_step = (
+            f"REQUIRED: run `/codify {skill_name}` IMMEDIATELY in this same turn. "
+            f"Read {output_path}, then read the source playbook lessons, then "
+            f"rewrite the YAML `description:` to trigger on real delegation "
+            f"phrasing and replace the `## Orchestrated skills` + "
+            f"`## When to invoke this agent` stubs with the concrete skill-to-"
+            f"curriculum mapping and invocation rules. Do not return control to "
+            f"the user until codify is done."
+        )
+        critical_rule = (
+            "The returned scaffold is NOT a complete agent. The auto-generated "
+            "`description:` is a triggerable default but verbose; the "
+            "`## Orchestrated skills` and `## When to invoke this agent` "
+            "sections are literal stubs. Shipping this scaffold as-is means the "
+            "agent will either fail to be selected by subagent dispatch OR will "
+            "be selected and produce nothing useful. /codify is atomic with "
+            "compose — do not skip it, do not defer it."
+        )
+    else:
+        next_step = (
+            f"REQUIRED: run `/codify {skill_name}` IMMEDIATELY in this same turn. "
+            f"Read {output_path}, then read the source playbook lessons, then "
+            f"rewrite the YAML `description:` to trigger on natural user phrasing "
+            f"and replace the `## How to apply` stub with a real ordered procedure "
+            f"citing source sections + timestamps. Do not return control to the "
+            f"user until codify is done."
+        )
+        critical_rule = (
+            "The returned scaffold is NOT a complete skill. The auto-generated "
+            "`description:` is a triggerable default but verbose; the "
+            "`## How to apply` section is a literal stub. Shipping this scaffold "
+            "as-is means the skill will either fail to trigger on real user "
+            "phrasing OR will trigger and produce nothing useful. /codify is "
+            "atomic with compose — do not skip it, do not defer it."
+        )
+
     return {
         "ok": True,
+        "shape": resolved_shape,
+        "shapeResolvedFrom": "explicit" if shape != "auto" else "heuristic",
         "skillName": skill_name,
-        "skillSlug": skill_slug,
-        "skillPath": str(skill_md_path),
-        "skillDirectory": str(target),
+        "skillSlug": slug,
+        # Back-compat: skillPath populated when shape=skill, agentPath when agent.
+        # outputPath is always the actual on-disk file, regardless of shape.
+        "skillPath": str(output_path) if not is_agent else None,
+        "skillDirectory": str(output_dir) if not is_agent else None,
+        "agentPath": str(output_path) if is_agent else None,
+        "agentDirectory": str(output_dir) if is_agent else None,
+        "outputPath": str(output_path),
+        "outputDirectory": str(output_dir),
         "sourcePlaybook": manifest.get("name"),
         "sourceKind": _source_kind(manifest),
         "sectionCount": len(sections),
@@ -637,23 +881,9 @@ def compose_skill_scaffold_from_playbook(
         "webWordCount": web_word_count,
         # nextStep is a hard contract — every successful compose call must be
         # immediately followed by /codify in the same turn. The scaffold is
-        # NOT a complete skill; the auto-generated description is a default,
-        # the "How to apply" section is a stub, and shipping either as-is is
-        # a known-bad outcome.
-        "nextStep": (
-            f"REQUIRED: run `/codify {skill_name}` IMMEDIATELY in this same turn. "
-            f"Read {skill_md_path}, then read the source playbook lessons, then "
-            f"rewrite the YAML `description:` to trigger on natural user phrasing "
-            f"and replace the `## How to apply` stub with a real ordered procedure "
-            f"citing source sections + timestamps. Do not return control to the "
-            f"user until codify is done."
-        ),
-        "criticalRule": (
-            "The returned scaffold is NOT a complete skill. The auto-generated "
-            "`description:` is a triggerable default but verbose; the "
-            "`## How to apply` section is a literal stub. Shipping this scaffold "
-            "as-is means the skill will either fail to trigger on real user "
-            "phrasing OR will trigger and produce nothing useful. /codify is "
-            "atomic with compose — do not skip it, do not defer it."
-        ),
+        # NOT a complete skill/agent; the auto-generated description is a
+        # default, the codify stubs are literal placeholders, and shipping
+        # either as-is is a known-bad outcome.
+        "nextStep": next_step,
+        "criticalRule": critical_rule,
     }
