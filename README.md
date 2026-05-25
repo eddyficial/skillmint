@@ -56,7 +56,31 @@ The MCP server registers these tools (all under the `mcp__skillmint__` prefix):
 - `distill_tutorial_playbook(name)` — strip karaoke noise, group into topical sections; works on any source
 
 **Skill synthesis (source-agnostic)**
-- `compose_skill_scaffold_from_playbook(playbook_name, skill_name, ...)` — writes `.claude/skills/<slug>/SKILL.md` scaffold; current Claude session finishes the codification via the `/codify` skill
+- `compose_skill_scaffold_from_playbook(playbook_name, skill_name, shape=..., ...)` — writes one of three scaffolds depending on `shape`:
+  - `shape="skill"` (default for short captures) — `.claude/skills/<slug>/SKILL.md` (one procedure)
+  - `shape="agent"` (auto-detected on bootcamp/curriculum titles + ≥10 sections) — `.claude/agents/<slug>.md` (a role that delegates to many skills)
+  - `shape="workflow"` (opt-in only) — `.claude/workflows/<slug>.md` (orchestration document with sequenced steps, decision gates, data flow, rollback)
+  - `shape="auto"` runs the skill-vs-agent heuristic; workflow shape is never auto-selected.
+
+  Every scaffold ships with **governance sections as stubs**: typed `inputs:`/`outputs:` in YAML frontmatter, plus body sections (`## Success criteria`, `## Failure modes`, `## Dependencies` for skills; `## Owned skills`, `## Constraints`, `## Error handling` for agents; `## Steps`, `## Decision gates`, `## Data flow`, `## Rollback` for workflows). The current Claude Code session fills these in via `/codify`.
+
+## The `/codify` dependency
+
+Skillmint's `compose_*` tools produce **scaffolds, not finished skills.** Every scaffold YAML frontmatter has `inputs: null` / `outputs: null` placeholders, and every body section after `## Source playbook` is a literal `_(Stub. Run /codify ...)` block.
+
+To turn a scaffold into a usable skill, agent, or workflow you must run the `/codify` slash command in the same Claude Code session.
+
+**`/codify` is provided by [Periphery](https://github.com/eddyficial/Periphery), not by Skillmint.** Skillmint depends on Periphery's `.claude/skills/codify/` being installed for the pipeline to be end-to-end usable. If you run Skillmint standalone, the scaffolds you produce will be structurally valid but functionally inert until you (or another agent) edit them by hand.
+
+The contract:
+
+```
+[Skillmint]                            [Periphery]
+capture → distill → compose  ───────►  /codify
+   (writes scaffold with stubs)         (fills in stubs from playbook lessons)
+```
+
+Compose returns `nextStep` and `criticalRule` fields that document this contract at the MCP boundary, so any agent calling `compose_skill_scaffold_from_playbook` knows it must follow up with `/codify` immediately.
 
 ## Install
 
