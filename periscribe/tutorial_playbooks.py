@@ -138,14 +138,22 @@ def persist_playbook_from_snapshot(
                     f"tutorial playbook '{name}' already exists; pass overwrite=True to replace it."
                 )
             shutil.rmtree(target_dir)
+        target_dir.mkdir(parents=True)
         keyframes_dir = target_dir / "keyframes"
-        keyframes_dir.mkdir(parents=True)
+        # Only create the keyframes/ dir if at least one step actually has bytes.
+        any_keyframes = any((s.get("keyframeJpeg") or b"") for s in steps)
+        if any_keyframes:
+            keyframes_dir.mkdir(parents=True, exist_ok=True)
 
         persisted_steps: list[dict[str, Any]] = []
         for idx, step in enumerate(steps, start=1):
-            keyframe_path = keyframes_dir / f"{idx:03d}.jpg"
             jpeg = step.get("keyframeJpeg") or b""
-            keyframe_path.write_bytes(jpeg)
+            if jpeg:
+                keyframe_path = keyframes_dir / f"{idx:03d}.jpg"
+                keyframe_path.write_bytes(jpeg)
+                keyframe_relpath: str | None = f"keyframes/{idx:03d}.jpg"
+            else:
+                keyframe_relpath = None
             persisted_steps.append(
                 {
                     "ordinal": idx,
@@ -157,7 +165,7 @@ def persist_playbook_from_snapshot(
                     "secondsSincePrevious": step.get("secondsSincePrevious"),
                     "videoStartSeconds": step.get("videoStartSeconds"),
                     "videoEndSeconds": step.get("videoEndSeconds"),
-                    "keyframeRelativePath": f"keyframes/{idx:03d}.jpg",
+                    "keyframeRelativePath": keyframe_relpath,
                     "keyframeWidth": step.get("keyframeWidth"),
                     "keyframeHeight": step.get("keyframeHeight"),
                     "keyframeByteLength": len(jpeg),
@@ -235,8 +243,9 @@ def _render_transcript_markdown(
             lines.append("")
             lines.append(f"_Captions:_ {step['captionText']}")
         lines.append("")
-        lines.append(f"![Step {step['ordinal']}]({step['keyframeRelativePath']})")
-        lines.append("")
+        if step.get("keyframeRelativePath"):
+            lines.append(f"![Step {step['ordinal']}]({step['keyframeRelativePath']})")
+            lines.append("")
     if snapshot.get("fullTranscriptText"):
         lines.append("## Full Transcript")
         lines.append("")
