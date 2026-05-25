@@ -35,6 +35,8 @@ dependencies = [
   "mcp>=1.0.0",
   "yt-dlp>=2024.0",
   "pdfplumber>=0.11",
+  "httpx>=0.27",
+  "lxml>=5.0",
 ]
 
 [project.urls]

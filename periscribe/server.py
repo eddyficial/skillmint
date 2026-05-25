@@ -33,6 +33,11 @@ from periscribe.live_video import (
     youtube_watch_status,
 )
 from periscribe.offline_video_capture import capture_youtube_video_to_playbook
+from periscribe.document_capture import (
+    capture_documentation_site_to_playbook,
+    capture_pdf_to_playbook,
+    capture_web_page_to_playbook,
+)
 from periscribe.skill_synthesis import (
     SkillSynthesisError,
     compose_skill_scaffold_from_playbook,
@@ -481,6 +486,116 @@ def compose_skill_scaffold_from_playbook_tool(
         )
     except SkillSynthesisError as exc:
         return _skill_synthesis_error_payload(exc)
+
+
+# ---------------------------------------------------------------------------
+# Document capture (HTML pages, PDFs, multi-page doc sites)
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool(
+    name="capture_web_page_to_playbook",
+    description=(
+        "Fetch a single HTML page, strip nav/footer/script noise, extract the main content, "
+        "split it into heading-based sections, and persist as a Periscribe playbook. Use for "
+        "setup guides, single-page references, blog tutorials, and other one-URL training "
+        "material. The resulting playbook is consumed by distill_tutorial_playbook -> "
+        "compose_skill_scaffold_from_playbook -> /codify exactly like a YouTube playbook."
+    ),
+)
+def capture_web_page_to_playbook_tool(
+    url: str,
+    name: str,
+    summary: str | None = None,
+    overwrite: bool = False,
+    timeout_seconds: float = 30.0,
+) -> str:
+    try:
+        return _json_payload(
+            capture_web_page_to_playbook(
+                url=url,
+                name=name,
+                summary=summary,
+                overwrite=overwrite,
+                timeout_seconds=timeout_seconds,
+            )
+        )
+    except TutorialPlaybookError as exc:
+        return _tutorial_playbook_error_payload(exc)
+
+
+@mcp.tool(
+    name="capture_pdf_to_playbook",
+    description=(
+        "Extract text from a local PDF (vendor whitepaper, API reference, ebook) and persist "
+        "as a Periscribe playbook with one step per page. Pass page_range as [start, end] to "
+        "slice long PDFs. Does NOT OCR scanned images; if no text comes out, the PDF is "
+        "image-only and needs OCR (not implemented). After capture, run distill_tutorial_playbook "
+        "to re-group by topic."
+    ),
+)
+def capture_pdf_to_playbook_tool(
+    path: str,
+    name: str,
+    summary: str | None = None,
+    overwrite: bool = False,
+    page_range: list[int] | None = None,
+) -> str:
+    if page_range is not None and len(page_range) != 2:
+        return _tutorial_playbook_error_payload(
+            TutorialPlaybookError("page_range must be a 2-element list [start, end]")
+        )
+    pr = tuple(page_range) if page_range else None
+    try:
+        return _json_payload(
+            capture_pdf_to_playbook(
+                path=path,
+                name=name,
+                summary=summary,
+                overwrite=overwrite,
+                page_range=pr,
+            )
+        )
+    except TutorialPlaybookError as exc:
+        return _tutorial_playbook_error_payload(exc)
+
+
+@mcp.tool(
+    name="capture_documentation_site_to_playbook",
+    description=(
+        "BFS-crawl a documentation site starting at a seed URL up to max_pages, following "
+        "same-origin links inside the main content area. Each fetched page becomes one or more "
+        "steps (split by heading). Use for multi-page API docs (docs.anthropic.com, "
+        "learn.microsoft.com, etc.). Pass url_pattern (substring or regex) to constrain which "
+        "links are followed -- e.g. r'/docs/' to skip blog/marketing pages. Static HTML only; "
+        "JS-rendered sites will return their skeleton, not the rendered content."
+    ),
+)
+def capture_documentation_site_to_playbook_tool(
+    url: str,
+    name: str,
+    summary: str | None = None,
+    overwrite: bool = False,
+    max_pages: int = 30,
+    same_origin_only: bool = True,
+    url_pattern: str | None = None,
+    timeout_seconds: float = 30.0,
+) -> str:
+    try:
+        return _json_payload(
+            capture_documentation_site_to_playbook(
+                url=url,
+                name=name,
+                summary=summary,
+                overwrite=overwrite,
+                max_pages=max_pages,
+                same_origin_only=same_origin_only,
+                url_pattern=url_pattern,
+                timeout_seconds=timeout_seconds,
+            )
+        )
+    except TutorialPlaybookError as exc:
+        return _tutorial_playbook_error_payload(exc)
 
 
 # ---------------------------------------------------------------------------
