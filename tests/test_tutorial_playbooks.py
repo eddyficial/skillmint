@@ -10,8 +10,8 @@ from pathlib import Path
 import pytest
 from PIL import Image as _PILImage
 
-import periscribe.live_video as lv
-import periscribe.tutorial_playbooks as tp
+import skillmint.live_video as lv
+import skillmint.tutorial_playbooks as tp
 
 
 def _make_jpeg(color: tuple[int, int, int]) -> bytes:
@@ -50,7 +50,7 @@ SAMPLE_METADATA = {
 @pytest.fixture(autouse=True)
 def _isolated_store(monkeypatch, tmp_path: Path):
     """Point the playbook store and live-video helpers at hermetic fixtures."""
-    monkeypatch.setenv("PERISCRIBE_PLAYBOOK_DIR", str(tmp_path / "playbooks"))
+    monkeypatch.setenv("SKILLMINT_PLAYBOOK_DIR", str(tmp_path / "playbooks"))
     monkeypatch.setattr(lv, "_require_executable", lambda name: f"/fake/bin/{name}")
     monkeypatch.setattr(lv, "_start_video_extractor", lambda session: None)
     monkeypatch.setattr(lv, "_start_audio_extractor", lambda session: None)
@@ -264,7 +264,7 @@ def test_build_sections_groups_steps_by_quiet_and_diff() -> None:
 
 def test_distill_tutorial_playbook_writes_lessons_files(tmp_path, monkeypatch) -> None:
     """End-to-end: a saved playbook gets a lessons.md + lessons.json after distill."""
-    monkeypatch.setenv("PERISCRIBE_PLAYBOOK_DIR", str(tmp_path))
+    monkeypatch.setenv("SKILLMINT_PLAYBOOK_DIR", str(tmp_path))
     session_id = _populate_session_with_steps(4)
     tp.save_tutorial_as_playbook(session_id, "distill-target", overwrite=True)
     result = tp.distill_tutorial_playbook("distill-target")
@@ -289,7 +289,7 @@ def test_distill_tutorial_playbook_unknown_name_raises() -> None:
 
 def test_rename_moves_directory_and_updates_manifest(tmp_path, monkeypatch) -> None:
     """A successful rename relocates the dir and updates name/slug in manifest + lessons."""
-    monkeypatch.setenv("PERISCRIBE_PLAYBOOK_DIR", str(tmp_path))
+    monkeypatch.setenv("SKILLMINT_PLAYBOOK_DIR", str(tmp_path))
     session_id = _populate_session_with_steps(3)
     tp.save_tutorial_as_playbook(session_id, "verbose-original-name")
     tp.distill_tutorial_playbook("verbose-original-name")
@@ -307,14 +307,14 @@ def test_rename_moves_directory_and_updates_manifest(tmp_path, monkeypatch) -> N
 
 def test_rename_rejects_unknown_source(tmp_path, monkeypatch) -> None:
     """Renaming a nonexistent playbook raises."""
-    monkeypatch.setenv("PERISCRIBE_PLAYBOOK_DIR", str(tmp_path))
+    monkeypatch.setenv("SKILLMINT_PLAYBOOK_DIR", str(tmp_path))
     with pytest.raises(tp.TutorialPlaybookError, match="not found"):
         tp.rename_tutorial_playbook("ghost", "anything")
 
 
 def test_rename_refuses_to_overwrite_without_flag(tmp_path, monkeypatch) -> None:
     """Renaming into an existing slug fails unless overwrite=True."""
-    monkeypatch.setenv("PERISCRIBE_PLAYBOOK_DIR", str(tmp_path))
+    monkeypatch.setenv("SKILLMINT_PLAYBOOK_DIR", str(tmp_path))
     s1 = _populate_session_with_steps(2)
     s2 = _populate_session_with_steps(2)
     tp.save_tutorial_as_playbook(s1, "source-name")
@@ -329,7 +329,7 @@ def test_rename_refuses_to_overwrite_without_flag(tmp_path, monkeypatch) -> None
 
 def test_rename_rejects_self_rename(tmp_path, monkeypatch) -> None:
     """Renaming a playbook to its own name is rejected up front."""
-    monkeypatch.setenv("PERISCRIBE_PLAYBOOK_DIR", str(tmp_path))
+    monkeypatch.setenv("SKILLMINT_PLAYBOOK_DIR", str(tmp_path))
     sid = _populate_session_with_steps(2)
     tp.save_tutorial_as_playbook(sid, "self")
     with pytest.raises(tp.TutorialPlaybookError, match="identical"):

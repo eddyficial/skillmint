@@ -3,9 +3,9 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "periscribe"
+name = "skillmint"
 version = "0.1.0"
-description = "Capture, distill, and codify external knowledge (YouTube tutorials, PDFs, docs) into reusable Claude Code skills. MCP server sibling to Periphery."
+description = "Skillmint — capture, distill, and codify external knowledge (YouTube tutorials, PDFs, docs) into reusable Claude Code skills. MCP server sibling to Periphery."
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
@@ -40,9 +40,9 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://periscribe.ai"
-Repository = "https://github.com/eddyficial/Periscribe"
-Issues = "https://github.com/eddyficial/Periscribe/issues"
+Homepage = "https://skillmint.ai"
+Repository = "https://github.com/eddyficial/skillmint"
+Issues = "https://github.com/eddyficial/skillmint/issues"
 
 [project.optional-dependencies]
 dev = [
@@ -55,7 +55,7 @@ video-transcription = [
 ]
 
 [project.scripts]
-periscribe = "periscribe.server:main"
+skillmint = "skillmint.server:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

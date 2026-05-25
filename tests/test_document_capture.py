@@ -11,20 +11,20 @@ import httpx
 import pytest
 
 # Re-route the playbook store to a per-test temp directory.
-os.environ.setdefault("PERISCRIBE_PLAYBOOK_DIR", "")
+os.environ.setdefault("SKILLMINT_PLAYBOOK_DIR", "")
 
 
 @pytest.fixture(autouse=True)
 def _isolated_store(tmp_path, monkeypatch):
     store = tmp_path / "playbooks"
-    monkeypatch.setenv("PERISCRIBE_PLAYBOOK_DIR", str(store))
+    monkeypatch.setenv("SKILLMINT_PLAYBOOK_DIR", str(store))
     yield
     if store.exists():
         shutil.rmtree(store, ignore_errors=True)
 
 
 # Important: import the module AFTER the env var fixture sets the store path.
-from periscribe.document_capture import (  # noqa: E402
+from skillmint.document_capture import (  # noqa: E402
     capture_documentation_site_to_playbook,
     capture_pdf_to_playbook,
     capture_web_page_to_playbook,
@@ -34,7 +34,7 @@ from periscribe.document_capture import (  # noqa: E402
     _strip_noise,
     _parse_html,
 )
-from periscribe.tutorial_playbooks import TutorialPlaybookError  # noqa: E402
+from skillmint.tutorial_playbooks import TutorialPlaybookError  # noqa: E402
 
 
 SAMPLE_HTML = """

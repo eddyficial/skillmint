@@ -29,8 +29,16 @@ class SkillSynthesisError(RuntimeError):
 
 
 def _skill_dir(skill_slug: str, *, base: Path | None = None) -> Path:
-    """Return the on-disk location for a project-local skill."""
+    """Return the on-disk location for a project-local skill.
+
+    ``base`` may be either a project root (in which case ``.claude/skills`` is
+    appended) or a path that already ends in ``.claude/skills`` (in which case
+    the slug is appended directly). Both forms produce the same final path.
+    """
     root = base if base is not None else Path.cwd()
+    parts = root.parts[-2:]
+    if len(parts) == 2 and parts[-2] == ".claude" and parts[-1] == "skills":
+        return root / skill_slug
     return root / ".claude" / "skills" / skill_slug
 
 

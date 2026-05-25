@@ -957,7 +957,7 @@ def _start_video_extractor(session: _Session) -> None:
     thread = threading.Thread(
         target=_frame_extractor_loop,
         args=(session,),
-        name=f"periscribe-live-video-frames-{session.session_id[:8]}",
+        name=f"skillmint-live-video-frames-{session.session_id[:8]}",
         daemon=True,
     )
     session.video_thread = thread
@@ -988,7 +988,7 @@ def _audio_extractor_loop(session: _Session) -> None:
     if process is None or process.stdout is None:
         return
 
-    model_name = os.environ.get("PERISCRIBE_WHISPER_MODEL", "tiny")
+    model_name = os.environ.get("SKILLMINT_WHISPER_MODEL", "tiny")
     try:
         model = WhisperModel(model_name, compute_type="int8")
     except Exception as exc:  # noqa: BLE001 - surfaced via session status
@@ -1089,7 +1089,7 @@ def _start_audio_extractor(session: _Session) -> None:
     thread = threading.Thread(
         target=_audio_extractor_loop,
         args=(session,),
-        name=f"periscribe-live-video-audio-{session.session_id[:8]}",
+        name=f"skillmint-live-video-audio-{session.session_id[:8]}",
         daemon=True,
     )
     session.audio_thread = thread
@@ -1169,7 +1169,7 @@ def _start_caption_poller(session: _Session) -> None:
     thread = threading.Thread(
         target=_caption_poller_loop,
         args=(session,),
-        name=f"periscribe-live-video-captions-{session.session_id[:8]}",
+        name=f"skillmint-live-video-captions-{session.session_id[:8]}",
         daemon=True,
     )
     session.caption_thread = thread
@@ -1193,7 +1193,7 @@ def _start_step_watchdog(session: _Session) -> None:
     thread = threading.Thread(
         target=_step_watchdog_loop,
         args=(session,),
-        name=f"periscribe-live-video-steps-{session.session_id[:8]}",
+        name=f"skillmint-live-video-steps-{session.session_id[:8]}",
         daemon=True,
     )
     thread.start()

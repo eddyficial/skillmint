@@ -7,7 +7,7 @@ import time
 
 import pytest
 
-import periscribe.live_video as live_video
+import skillmint.live_video as live_video
 
 
 # Test helpers ---------------------------------------------------------------
