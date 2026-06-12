@@ -1,105 +1,323 @@
-# Skillmint
+# SkillMint
 
-Capture, distill, and codify external knowledge into reusable Claude Code skills.
+Source in. Certified skill out.
 
-Skillmint is the **learning loop** in the Periphery family — sibling to [Periphery](https://periphery.ai) (Windows desktop MCP) and the [PeriCode](https://pericode.dev) family (CLI / Inside / Sidecar agent distributions).
+SkillMint is an open-source capability compiler for agent systems. It turns source material such as videos, SOPs, PDFs, web pages, and documentation into traceable playbooks, generated agent skills, and machine-readable trust artifacts.
 
-Where Periphery lets an agent **see and act on** a Windows desktop, Skillmint lets an agent **learn from** external content (YouTube tutorials, PDFs, web docs) and turn that knowledge into permanent capabilities (Claude Code skills, playbooks, trained models).
+The goal is not to summarize content. The goal is to compile operational knowledge into reusable, inspectable, testable agent capabilities.
 
-## What it does
+## Current Status
 
-Skillmint is an MCP server. It exposes tools that move along this pipeline:
+SkillMint is alpha software, but the core local workflow is usable today for controlled sources:
 
-```
-YouTube URL  ─┐
-HTML page    ─┤
-PDF file     ─┼──→  capture_*_to_playbook   →  ~/.skillmint/playbooks/<slug>/
-Docs site    ─┘                                 (manifest, steps, transcript, optional keyframes)
-                          ↓
-                 distill_tutorial_playbook   →  lessons.md, lessons.json (cleaned, sectioned)
-                          ↓
-              compose_skill_scaffold_from_playbook
-                                              →  .claude/skills/<slug>/SKILL.md (scaffold)
-                          ↓
-                  /codify slash command       →  .claude/skills/<slug>/SKILL.md (procedure filled in)
-                          ↓
-                  Any future Claude Code session auto-loads the skill on matching user phrasing
-```
+- owned material
+- licensed material
+- internal SOPs and documentation
+- public-domain material
+- material where you can attest permission or fair-use review
 
-Four source types, one downstream pipeline. The agent that started the day knowing nothing about Vercel / Power BI / your vendor's API can — after one Skillmint pipeline run — walk a user through doing that thing, citing the source section / page / video timestamp when claims are grounded.
+The local GUI now enforces the safer path: generated GUI skills must be finalized, validated, and certification-gated. The GUI also requires a rights basis before it starts a creation job.
 
-## Tools
+Do not treat generated capabilities as production-ready for high-risk domains until the certification artifacts pass and you have reviewed the generated skill.
 
-The MCP server registers these tools (all under the `mcp__skillmint__` prefix):
+## What It Creates
 
-**Capture — YouTube**
-- `capture_youtube_video_to_playbook(url, name, ...)` — offline-batch capture: yt-dlp downloads, ffmpeg decodes at native speed (~100×+ real-time), keyframe diff produces step events, captions bound per-step by video timestamp. A 4-hour course typically lands in 1–2 minutes.
-- `youtube_frame_snapshot(url, at_seconds, ...)` — one-shot frame pull
-- `youtube_captions(url, max_cues, ...)` — per-cue caption fetch
-- `get_youtube_video_info(url)` — metadata only
-- `live_video_status()` — readiness check (ffmpeg, yt-dlp, faster-whisper)
+For each source, SkillMint can produce:
 
-**Capture — written material**
-- `capture_web_page_to_playbook(url, name, ...)` — fetch a single HTML page, strip nav/footer/script noise, extract main content, split into heading-based sections. For setup guides, blog tutorials, single-page references. JS-rendered sites return their skeleton; export to PDF as workaround.
-- `capture_pdf_to_playbook(path, name, page_range=None, ...)` — extract text from a local PDF, one step per page. Pass `page_range=[start, end]` for long PDFs. Does not OCR scanned image-only PDFs.
-- `capture_documentation_site_to_playbook(url, name, max_pages=30, url_pattern=None, ...)` — BFS-crawl a docs site from a seed URL, following same-origin links inside main content. For multi-page API docs (`docs.anthropic.com`, `learn.microsoft.com`). Use `url_pattern=r"/docs/"` or similar to constrain scope.
+- a normalized playbook
+- distilled lessons
+- a generated skill
+- target exports for Claude Code, Codex, Cursor, Windsurf, or Markdown
+- `capability.json`
+- `evidence.json`
+- `certification.json`
+- rights and provenance assessment
+- prompt-injection assessment
+- audit ledger entry
+- local capability registry entry
 
-**Real-time follow-along (YouTube only)**
-- `start_youtube_watch / poll_youtube_watch / stop_youtube_watch` — long-running watch session
-- `follow_youtube_tutorial(session_id, ...)` — step-event polling (collapses frame firehose to logical moments)
-- `list_youtube_watches`, `youtube_watch_status`
+The playbook is used as the source-of-truth during generation. In the GUI, keeping the playbook on disk is optional.
 
-**Playbook lifecycle (source-agnostic)**
-- `save_tutorial_as_playbook(session_id, name)` — persist a live watch session
-- `list_tutorial_playbooks()`, `read_tutorial_playbook(name)`, `delete_tutorial_playbook(name)`
-- `rename_tutorial_playbook(old_name, new_name)` — short topic names so users can recall
-- `distill_tutorial_playbook(name)` — strip karaoke noise, group into topical sections; works on any source
+## How It Works
 
-**Skill synthesis (source-agnostic)**
-- `compose_skill_scaffold_from_playbook(playbook_name, skill_name, shape=..., ...)` — writes one of three scaffolds depending on `shape`:
-  - `shape="skill"` (default for short captures) — `.claude/skills/<slug>/SKILL.md` (one procedure)
-  - `shape="agent"` (auto-detected on bootcamp/curriculum titles + ≥10 sections) — `.claude/agents/<slug>.md` (a role that delegates to many skills)
-  - `shape="workflow"` (opt-in only) — `.claude/workflows/<slug>.md` (orchestration document with sequenced steps, decision gates, data flow, rollback)
-  - `shape="auto"` runs the skill-vs-agent heuristic; workflow shape is never auto-selected.
-
-  Every scaffold ships with **governance sections as stubs**: typed `inputs:`/`outputs:` in YAML frontmatter, plus body sections (`## Success criteria`, `## Failure modes`, `## Dependencies` for skills; `## Owned skills`, `## Constraints`, `## Error handling` for agents; `## Steps`, `## Decision gates`, `## Data flow`, `## Rollback` for workflows). The current Claude Code session fills these in via `/codify`.
-
-## The `/codify` dependency
-
-Skillmint's `compose_*` tools produce **scaffolds, not finished skills.** Every scaffold YAML frontmatter has `inputs: null` / `outputs: null` placeholders, and every body section after `## Source playbook` is a literal `_(Stub. Run /codify ...)` block.
-
-To turn a scaffold into a usable skill, agent, or workflow you must run the `/codify` slash command in the same Claude Code session.
-
-**`/codify` is provided by [Periphery](https://github.com/eddyficial/Periphery), not by Skillmint.** Skillmint depends on Periphery's `.claude/skills/codify/` being installed for the pipeline to be end-to-end usable. If you run Skillmint standalone, the scaffolds you produce will be structurally valid but functionally inert until you (or another agent) edit them by hand.
-
-The contract:
-
-```
-[Skillmint]                            [Periphery]
-capture → distill → compose  ───────►  /codify
-   (writes scaffold with stubs)         (fills in stubs from playbook lessons)
+```text
+source
+  -> capture
+  -> playbook
+  -> distill
+  -> prompt-injection scan
+  -> scaffold
+  -> codify
+  -> export
+  -> validate
+  -> certify
 ```
 
-Compose returns `nextStep` and `criticalRule` fields that document this contract at the MCP boundary, so any agent calling `compose_skill_scaffold_from_playbook` knows it must follow up with `/codify` immediately.
+1. **Capture**
+
+   SkillMint captures a YouTube video, local video, PDF, web page, or documentation site into a normalized playbook. Videos are segmented into timed steps with captions and optional keyframes. Written sources become structured text sections.
+
+2. **Distill**
+
+   Raw steps are grouped into lessons. This produces `lessons.md` and `lessons.json`.
+
+3. **Guard**
+
+   Captured source text is scanned for prompt injection before any skill is created. If the source tries to tell SkillMint, Codex, Claude, or an agent to create a different skill, ignore instructions, read secrets, call tools, or change roles, creation stops.
+
+4. **Scaffold And Codify**
+
+   SkillMint composes a scaffold and finalizes it into an executable skill. Deterministic codification is the default and does not require an AI provider. Claude CLI codification is optional.
+
+5. **Validate And Certify**
+
+   Validation executes the generated skill against its success criteria through the local Claude CLI. Certification combines validation results with source fidelity, evidence bindings, codification status, rights governance, prompt-injection screening, visual grounding, and validator coverage.
 
 ## Install
 
+SkillMint is Windows-first and targets Python 3.11+.
+
 ```powershell
-# Clone + venv
 git clone https://github.com/eddyficial/skillmint.git
 cd skillmint
 python -m venv .venv
-.venv\Scripts\Activate.ps1
-pip install -e .[video-transcription]
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+python -m pip install -e ".[dev,video-transcription]"
 ```
 
-System deps:
-- **Python 3.11+**
-- **ffmpeg** on PATH for YouTube capture (Windows: `winget install ffmpeg` or [gyan.dev/ffmpeg](https://www.gyan.dev/ffmpeg/builds/)). Not needed for web/PDF/docs capture.
-- yt-dlp, httpx, lxml, pdfplumber installed via pip deps (no extra system setup).
-- Optional `[video-transcription]` extra adds faster-whisper for audio transcription when captions are missing.
+Required for video capture:
 
-Register with your MCP client (Claude Code / Cursor / etc) by adding to `.mcp.json`:
+- `ffmpeg` on `PATH`
+- `yt-dlp`, installed through Python dependencies
+
+Quick checks:
+
+```powershell
+ffmpeg -version
+python -m yt_dlp --version
+```
+
+On Windows, one common `ffmpeg` install path is:
+
+```powershell
+winget install Gyan.FFmpeg
+```
+
+Required for GUI-certified creation and certified CLI commands:
+
+- Claude Code CLI on `PATH`, because validation uses `claude -p`
+
+Quick check:
+
+```powershell
+claude --version
+```
+
+Optional extras:
+
+```powershell
+python -m pip install -e ".[rendered-web]"
+python -m playwright install chromium
+python -m pip install -e ".[ocr]"
+```
+
+Use `rendered-web` for JavaScript-rendered pages. Use `ocr` only when working with scanned PDFs and local OCR tooling.
+
+## Use The Local GUI
+
+Start the workbench:
+
+```powershell
+skillmint-ui --open
+```
+
+or:
+
+```powershell
+.\.venv\Scripts\python.exe -m skillmint.web_ui --open
+```
+
+Then:
+
+1. Paste a source URL or local file path.
+2. Select a rights basis.
+3. Pick the export target.
+4. Leave **Keep playbook** checked if you want the intermediate playbook retained.
+5. Click **Create skill**.
+
+The GUI always creates a skill through the certified path:
+
+- finalization is on
+- validation is on
+- certification is required
+- rights basis is required
+- prompt-injection screening is enforced
+
+The GUI currently creates `Skill` assets only. Agent and workflow scaffolds still exist in lower-level APIs, but they are not exposed in the certified GUI path because execution validation currently supports skills.
+
+## Use The CLI
+
+The examples below use placeholders such as `<source-url>`. Replace them with source material you own, have licensed, or can otherwise use.
+
+For a local smoke source, start a tiny web server from the repo:
+
+```powershell
+python -m http.server 8123 --bind 127.0.0.1 --directory examples
+```
+
+Then use:
+
+```text
+http://127.0.0.1:8123/quickstart-sop.html
+```
+
+Stop the example server with `Ctrl+C` when you are done.
+
+Create a certified Markdown skill from a web page:
+
+```powershell
+skillmint-create "http://127.0.0.1:8123/quickstart-sop.html" `
+  --target markdown `
+  --rights-basis owned `
+  --validate `
+  --require-certification
+```
+
+Create a certified Codex skill from a YouTube video:
+
+```powershell
+skillmint-create "<youtube-url>" `
+  --target codex `
+  --rights-basis user_attested_permission `
+  --source-owner "Creator or channel name" `
+  --validate `
+  --require-certification
+```
+
+Create a certified skill from a local PDF:
+
+```powershell
+skillmint-create "C:\docs\internal-sop.pdf" `
+  --source-type pdf `
+  --target claude_code `
+  --rights-basis internal `
+  --validate `
+  --require-certification
+```
+
+Crawl a documentation site:
+
+```powershell
+skillmint-create "<docs-site-url>" `
+  --source-type documentation_site `
+  --max-pages 25 `
+  --rights-basis licensed `
+  --validate `
+  --require-certification
+```
+
+Use Claude CLI for richer codification:
+
+```powershell
+skillmint-create "<source-url>" `
+  --rights-basis owned `
+  --codify-provider claude_cli `
+  --validate `
+  --require-certification
+```
+
+The CLI still exposes lower-level development switches such as `--no-codify`. Do not use those for user-facing or shareable capabilities.
+
+## Rights Basis Values
+
+Use one of:
+
+- `owned`
+- `licensed`
+- `internal`
+- `user_attested_permission`
+- `creative_commons`
+- `public_domain`
+- `fair_use`
+
+Public or commercial export can be blocked when the rights assessment says the source is not safe for that intent.
+
+## Outputs
+
+Playbooks are stored under:
+
+```text
+~/.skillmint/playbooks/<slug>/
+```
+
+Override the playbook store:
+
+```powershell
+$env:SKILLMINT_PLAYBOOK_DIR = "C:\path\to\playbooks"
+```
+
+Typical playbook layout:
+
+```text
+~/.skillmint/playbooks/<slug>/
+  manifest.json
+  steps.json
+  transcript.md
+  lessons.md
+  lessons.json
+  keyframes/
+```
+
+Project-local trust artifacts are stored under:
+
+```text
+<project>/.skillmint/
+  capabilities/<skill-slug>/
+    capability.json
+    evidence.json
+    certification.json
+  audit/
+    capability-ledger.jsonl
+  registry/
+    capabilities.json
+```
+
+Target exports:
+
+```text
+Claude Code:  <project>/.claude/skills/<slug>/SKILL.md
+Codex:        <project>/.agents/skills/<slug>/SKILL.md
+Cursor:       <project>/.cursor/rules/<slug>.mdc
+Windsurf:     <project>/.windsurf/rules/<slug>.md
+Markdown:     <project>/.skillmint/exports/markdown/<slug>.md
+```
+
+Each export also gets a `skillmint.json` or `.skillmint.json` sidecar where that target supports it.
+
+## Safety Gates
+
+SkillMint includes deterministic gates for:
+
+- source prompt injection
+- rights and provenance
+- source fidelity
+- evidence bindings
+- codification completion
+- execution validation
+- certification scoring
+
+The prompt-injection gate runs before scaffold or export. The rights gate runs before export. Certification records the result of both.
+
+## MCP Server
+
+Run the MCP server:
+
+```powershell
+skillmint
+```
+
+Example MCP config:
 
 ```json
 {
@@ -114,36 +332,50 @@ Register with your MCP client (Claude Code / Cursor / etc) by adding to `.mcp.js
 }
 ```
 
-## Storage
+Recommended tool:
 
-Playbooks land at `~/.skillmint/playbooks/<slug>/` by default. Override with `SKILLMINT_PLAYBOOK_DIR`.
-
-Each playbook is a directory. Layout for video sources:
-```
-~/.skillmint/playbooks/<slug>/
-├── manifest.json          (name, source URL, metadata, step count, summary, sourceKind)
-├── steps.json             (ordered step records with timestamps, captions, keyframe paths)
-├── lessons.md             (cleaned prose, sectioned — after distill)
-├── lessons.json           (structured sections — after distill)
-├── transcript.md          (human-readable narration with embedded keyframes)
-└── keyframes/             (only present for video sources)
-    ├── 001.jpg
-    └── ...
+```text
+create_skill_from_source(source, skill_name=None, source_type="auto", ...)
 ```
 
-For HTML / PDF / docs-site sources the `keyframes/` directory is omitted and `transcript.md` is text-only. Everything downstream (distill, scaffold, codify) reads the same structure regardless of source.
+## Troubleshooting
 
-## House style
+**The GUI rejects my job with "rights basis required".**
 
-- **Windows-first**, Python 3.11+. Cross-platform support is a future goal, not a current contract.
-- **No human-control bypass.** A failed high-level action must not silently fall back to blind raw input. Surface the blocker.
-- **MCP tool wrappers must mirror the underlying function signature.** Adding a kwarg in `skillmint/<module>.py` requires updating the matching `*_tool` wrapper in `skillmint/server.py`, or MCP clients silently see old behavior.
+Select a rights basis before creating the skill. This is intentional.
 
-## Sibling projects
+**Validation fails because Claude CLI is unavailable.**
 
-- **[Periphery](https://periphery.ai)** — Windows MCP server for desktop / window / screen / input automation. The "do" to Skillmint's "learn."
-- **PeriCode** — agent distributions: CLI, Inside (in-process SDK), Sidecar (external UIA).
+Install Claude Code CLI and make sure `claude` is on `PATH`, then restart the GUI.
+
+**YouTube capture fails.**
+
+Confirm `ffmpeg` is on `PATH`, update `yt-dlp`, and try a video with captions first.
+
+**The prompt-injection guard blocks creation.**
+
+The source contains text that appears to target SkillMint, Codex, Claude, an agent, tools, shell commands, secrets, or system instructions. Use a different source or manually review the material.
+
+**A public export is blocked.**
+
+Use private/internal export, or provide a stronger rights basis such as `owned`, `licensed`, or `public_domain`.
+
+## Development
+
+Run tests:
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest -q
+```
+
+Current local result:
+
+```text
+203 passed, 1 skipped
+```
+
+When adding a public function argument, update every matching MCP wrapper in `skillmint/server.py`. MCP clients only see what the wrapper exposes.
 
 ## License
 
-MIT.
+MIT. See [LICENSE](LICENSE).

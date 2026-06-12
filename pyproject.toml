@@ -5,10 +5,10 @@ build-backend = "hatchling.build"
 [project]
 name = "skillmint"
 version = "0.1.0"
-description = "Skillmint — capture, distill, and codify external knowledge (YouTube tutorials, PDFs, docs) into reusable Claude Code skills. MCP server sibling to Periphery."
+description = "Compile videos, documents, and SOPs into source-backed, certified agent skills."
 readme = "README.md"
 requires-python = ">=3.11"
-license = "MIT"
+license = { text = "MIT" }
 authors = [
   { name = "Eddy" }
 ]
@@ -29,6 +29,8 @@ classifiers = [
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
   "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 dependencies = [
@@ -40,7 +42,7 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://skillmint.ai"
+Homepage = "https://github.com/eddyficial/skillmint"
 Repository = "https://github.com/eddyficial/skillmint"
 Issues = "https://github.com/eddyficial/skillmint/issues"
 
@@ -53,9 +55,17 @@ video-transcription = [
   "faster-whisper>=1.0",
   "numpy>=1.24",
 ]
+rendered-web = [
+  "playwright>=1.45",
+]
+ocr = [
+  "pytesseract>=0.3",
+]
 
 [project.scripts]
 skillmint = "skillmint.server:main"
+skillmint-create = "skillmint.automation:main"
+skillmint-ui = "skillmint.web_ui:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

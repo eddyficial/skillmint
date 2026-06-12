@@ -610,6 +610,24 @@ def _section_label(section: dict[str, Any], source_kind: str) -> str:
     return f"§{ordinal}"
 
 
+def _visual_action_summary(section: dict[str, Any], *, limit: int = 2) -> str:
+    actions = section.get("visualActions") or []
+    if not actions:
+        return ""
+    chunks: list[str] = []
+    for action in actions[:limit]:
+        action_type = str(action.get("actionType") or "unknown").replace("_", " ")
+        detail = action.get("visibleTextSample") or "; ".join(action.get("observations") or [])
+        if detail:
+            detail = _truncate_words(str(detail), 10)
+            chunks.append(f"{action_type}: {detail}")
+        else:
+            chunks.append(action_type)
+    if len(actions) > limit:
+        chunks.append(f"+{len(actions) - limit} more")
+    return "; ".join(chunks)
+
+
 def _knows_preamble(source_kind: str, section_count: int) -> str:
     """Source-kind-aware lead-in sentence for the 'What this skill knows' block."""
     base = f"Distilled from {section_count} sections of the source playbook. "
@@ -686,7 +704,10 @@ def _render_scaffold_markdown(
         snippet = _truncate_words((section.get("text") or "").strip(), 30)
         if not snippet:
             snippet = "_(no caption text)_"
+        visual = _visual_action_summary(section)
         lines.append(f"- **{_section_label(section, source_kind)}** — {snippet}")
+        if visual:
+            lines.append(f"  - Visual: {visual}")
     lines.append("")
 
     lines.append("## Inputs")

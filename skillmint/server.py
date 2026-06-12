@@ -32,7 +32,10 @@ from skillmint.live_video import (
     youtube_frame_snapshot,
     youtube_watch_status,
 )
-from skillmint.offline_video_capture import capture_youtube_video_to_playbook
+from skillmint.offline_video_capture import (
+    capture_local_video_to_playbook,
+    capture_youtube_video_to_playbook,
+)
 from skillmint.document_capture import (
     capture_documentation_site_to_playbook,
     capture_pdf_to_playbook,
@@ -42,6 +45,21 @@ from skillmint.skill_synthesis import (
     SkillSynthesisError,
     compose_skill_scaffold_from_playbook,
 )
+from skillmint.skill_creation import (
+    SkillCreationError,
+    create_skill_from_documentation_site,
+    create_skill_from_local_video,
+    create_skill_from_pdf,
+    create_skill_from_source,
+    create_skill_from_web_page,
+    create_skill_from_youtube_video,
+)
+from skillmint.skill_export import SkillExportError, export_skill_asset
+from skillmint.skill_validation import (
+    SkillValidationError,
+    validate_skill,
+)
+from skillmint._claude_cli import ClaudeCliError
 from skillmint.tutorial_playbooks import (
     TutorialPlaybookError,
     delete_tutorial_playbook,
@@ -83,6 +101,583 @@ def _tutorial_playbook_error_payload(exc: TutorialPlaybookError) -> str:
 
 def _skill_synthesis_error_payload(exc: SkillSynthesisError) -> str:
     return _json_payload({"ok": False, "error": str(exc), "errorType": "SkillSynthesisError"})
+
+
+def _skill_creation_error_payload(exc: Exception) -> str:
+    return _json_payload({"ok": False, "error": str(exc), "errorType": type(exc).__name__})
+
+
+def _skill_validation_error_payload(exc: Exception) -> str:
+    return _json_payload(
+        {"ok": False, "error": str(exc), "errorType": type(exc).__name__}
+    )
+
+
+# ---------------------------------------------------------------------------
+# One-shot skill creation
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool(
+    name="create_skill_from_source",
+    description=(
+        "Dynamic one-shot Skillmint pipeline. Pass a source string and Skillmint "
+        "routes it to YouTube, local video, web page, PDF, or documentation-site capture. "
+        "skill_name is optional; when omitted Skillmint derives a deterministic name from "
+        "the source URL or file path. "
+        "source_type='auto' is conservative: YouTube hosts, local video/PDF extensions, and "
+        "PDF URLs are detected; generic URLs become single web pages unless max_pages or "
+        "url_pattern indicates a docs crawl. By default the scaffold is finalized by "
+        "Skillmint's deterministic codifier; pass codify_provider='claude_cli' for AI polish."
+    ),
+)
+def create_skill_from_source_tool(
+    source: str,
+    skill_name: str | None = None,
+    source_type: str = "auto",
+    playbook_name: str | None = None,
+    summary: str | None = None,
+    shape: str = "skill",
+    trigger_description: str | None = None,
+    scope_notes: str | None = None,
+    owner_agent: str | None = None,
+    overwrite: bool = False,
+    skills_root: str | None = None,
+    target: str = "claude_code",
+    codify: bool = True,
+    codify_provider: str = "deterministic",
+    codify_timeout_seconds: float = 600.0,
+    validate: bool = False,
+    validation_timeout_seconds: float = 300.0,
+    keep_validation_sandbox: bool = False,
+    require_certification: bool = False,
+    fps: float = 1.0,
+    frame_width: int = 480,
+    keyframe_diff_threshold: float = 12.0,
+    min_step_seconds: float = 1.5,
+    caption_languages: list[str] | None = None,
+    max_height: int = 480,
+    download_timeout_seconds: float = 1800.0,
+    process_timeout_seconds: float = 1800.0,
+    captions_path: str | None = None,
+    caption_language: str = "en",
+    transcribe: bool = True,
+    whisper_model: str = "base",
+    whisper_device: str = "auto",
+    page_range: list[int] | None = None,
+    ocr: bool = False,
+    max_pages: int | None = None,
+    same_origin_only: bool = True,
+    url_pattern: str | None = None,
+    timeout_seconds: float = 30.0,
+    render_javascript: bool = False,
+    section_diff_score: float = 60.0,
+    rights_basis: str = "unknown",
+    source_owner: str | None = None,
+    source_license: str | None = None,
+    commercial_use_allowed: bool | None = None,
+    redistribution_allowed: bool | None = None,
+    export_intent: str = "private",
+) -> str:
+    if page_range is not None and len(page_range) != 2:
+        return _skill_creation_error_payload(
+            SkillCreationError("page_range must be a 2-element list [start, end]")
+        )
+    langs = tuple(caption_languages) if caption_languages else ("en",)
+    pr = tuple(page_range) if page_range else None
+    try:
+        return _json_payload(
+            create_skill_from_source(
+                source,
+                skill_name,
+                source_type=source_type,
+                playbook_name=playbook_name,
+                summary=summary,
+                shape=shape,
+                trigger_description=trigger_description,
+                scope_notes=scope_notes,
+                owner_agent=owner_agent,
+                overwrite=overwrite,
+                skills_root=skills_root,
+                target=target,
+                codify=codify,
+                codify_provider=codify_provider,
+                codify_timeout_seconds=codify_timeout_seconds,
+                validate=validate,
+                validation_timeout_seconds=validation_timeout_seconds,
+                keep_validation_sandbox=keep_validation_sandbox,
+                require_certification=require_certification,
+                fps=fps,
+                frame_width=frame_width,
+                keyframe_diff_threshold=keyframe_diff_threshold,
+                min_step_seconds=min_step_seconds,
+                caption_languages=langs,
+                max_height=max_height,
+                download_timeout_seconds=download_timeout_seconds,
+                process_timeout_seconds=process_timeout_seconds,
+                captions_path=captions_path,
+                caption_language=caption_language,
+                transcribe=transcribe,
+                whisper_model=whisper_model,
+                whisper_device=whisper_device,
+                page_range=pr,
+                ocr=ocr,
+                max_pages=max_pages,
+                same_origin_only=same_origin_only,
+                url_pattern=url_pattern,
+                timeout_seconds=timeout_seconds,
+                render_javascript=render_javascript,
+                section_diff_score=section_diff_score,
+                rights_basis=rights_basis,
+                source_owner=source_owner,
+                source_license=source_license,
+                commercial_use_allowed=commercial_use_allowed,
+                redistribution_allowed=redistribution_allowed,
+                export_intent=export_intent,
+            )
+        )
+    except (SkillCreationError, SkillExportError, ClaudeCliError, LiveVideoError, TutorialPlaybookError, SkillSynthesisError) as exc:
+        return _skill_creation_error_payload(exc)
+
+
+@mcp.tool(
+    name="create_skill_from_youtube_video",
+    description=(
+        "One-shot Skillmint pipeline for a YouTube VOD: capture the video to a playbook, "
+        "distill it, compose a .claude skill/agent/workflow asset, and by default finalize "
+        "the scaffold through Skillmint's deterministic codifier. Pass "
+        "codify_provider='claude_cli' for optional AI polish, or codify=false to stop "
+        "after scaffold creation."
+    ),
+)
+def create_skill_from_youtube_video_tool(
+    url: str,
+    skill_name: str,
+    playbook_name: str | None = None,
+    summary: str | None = None,
+    shape: str = "skill",
+    trigger_description: str | None = None,
+    scope_notes: str | None = None,
+    owner_agent: str | None = None,
+    overwrite: bool = False,
+    skills_root: str | None = None,
+    target: str = "claude_code",
+    codify: bool = True,
+    codify_provider: str = "deterministic",
+    codify_timeout_seconds: float = 600.0,
+    validate: bool = False,
+    validation_timeout_seconds: float = 300.0,
+    keep_validation_sandbox: bool = False,
+    require_certification: bool = False,
+    fps: float = 1.0,
+    frame_width: int = 480,
+    keyframe_diff_threshold: float = 12.0,
+    min_step_seconds: float = 1.5,
+    caption_languages: list[str] | None = None,
+    max_height: int = 480,
+    download_timeout_seconds: float = 1800.0,
+    process_timeout_seconds: float = 1800.0,
+    transcribe: bool = True,
+    whisper_model: str = "base",
+    whisper_device: str = "auto",
+    section_diff_score: float = 60.0,
+    rights_basis: str = "unknown",
+    source_owner: str | None = None,
+    source_license: str | None = None,
+    commercial_use_allowed: bool | None = None,
+    redistribution_allowed: bool | None = None,
+    export_intent: str = "private",
+) -> str:
+    langs = tuple(caption_languages) if caption_languages else ("en",)
+    try:
+        return _json_payload(
+            create_skill_from_youtube_video(
+                url,
+                skill_name,
+                playbook_name=playbook_name,
+                summary=summary,
+                shape=shape,
+                trigger_description=trigger_description,
+                scope_notes=scope_notes,
+                owner_agent=owner_agent,
+                overwrite=overwrite,
+                skills_root=skills_root,
+                target=target,
+                codify=codify,
+                codify_provider=codify_provider,
+                codify_timeout_seconds=codify_timeout_seconds,
+                validate=validate,
+                validation_timeout_seconds=validation_timeout_seconds,
+                keep_validation_sandbox=keep_validation_sandbox,
+                require_certification=require_certification,
+                fps=fps,
+                frame_width=frame_width,
+                keyframe_diff_threshold=keyframe_diff_threshold,
+                min_step_seconds=min_step_seconds,
+                caption_languages=langs,
+                max_height=max_height,
+                download_timeout_seconds=download_timeout_seconds,
+                process_timeout_seconds=process_timeout_seconds,
+                transcribe=transcribe,
+                whisper_model=whisper_model,
+                whisper_device=whisper_device,
+                section_diff_score=section_diff_score,
+                rights_basis=rights_basis,
+                source_owner=source_owner,
+                source_license=source_license,
+                commercial_use_allowed=commercial_use_allowed,
+                redistribution_allowed=redistribution_allowed,
+                export_intent=export_intent,
+            )
+        )
+    except (SkillCreationError, SkillExportError, ClaudeCliError, LiveVideoError, TutorialPlaybookError, SkillSynthesisError) as exc:
+        return _skill_creation_error_payload(exc)
+
+
+@mcp.tool(
+    name="create_skill_from_local_video",
+    description=(
+        "One-shot Skillmint pipeline for a local video file: local capture, distill, compose, "
+        "and deterministic finalization. Captions can come from a sidecar, "
+        "faster-whisper transcription, or be omitted."
+    ),
+)
+def create_skill_from_local_video_tool(
+    local_path: str,
+    skill_name: str,
+    playbook_name: str | None = None,
+    summary: str | None = None,
+    shape: str = "skill",
+    trigger_description: str | None = None,
+    scope_notes: str | None = None,
+    owner_agent: str | None = None,
+    overwrite: bool = False,
+    skills_root: str | None = None,
+    target: str = "claude_code",
+    codify: bool = True,
+    codify_provider: str = "deterministic",
+    codify_timeout_seconds: float = 600.0,
+    validate: bool = False,
+    validation_timeout_seconds: float = 300.0,
+    keep_validation_sandbox: bool = False,
+    require_certification: bool = False,
+    fps: float = 1.0,
+    frame_width: int = 480,
+    keyframe_diff_threshold: float = 12.0,
+    min_step_seconds: float = 1.5,
+    captions_path: str | None = None,
+    caption_language: str = "en",
+    transcribe: bool = True,
+    whisper_model: str = "base",
+    whisper_device: str = "auto",
+    process_timeout_seconds: float = 1800.0,
+    section_diff_score: float = 60.0,
+    rights_basis: str = "unknown",
+    source_owner: str | None = None,
+    source_license: str | None = None,
+    commercial_use_allowed: bool | None = None,
+    redistribution_allowed: bool | None = None,
+    export_intent: str = "private",
+) -> str:
+    try:
+        return _json_payload(
+            create_skill_from_local_video(
+                local_path,
+                skill_name,
+                playbook_name=playbook_name,
+                summary=summary,
+                shape=shape,
+                trigger_description=trigger_description,
+                scope_notes=scope_notes,
+                owner_agent=owner_agent,
+                overwrite=overwrite,
+                skills_root=skills_root,
+                target=target,
+                codify=codify,
+                codify_provider=codify_provider,
+                codify_timeout_seconds=codify_timeout_seconds,
+                validate=validate,
+                validation_timeout_seconds=validation_timeout_seconds,
+                keep_validation_sandbox=keep_validation_sandbox,
+                require_certification=require_certification,
+                fps=fps,
+                frame_width=frame_width,
+                keyframe_diff_threshold=keyframe_diff_threshold,
+                min_step_seconds=min_step_seconds,
+                captions_path=captions_path,
+                caption_language=caption_language,
+                transcribe=transcribe,
+                whisper_model=whisper_model,
+                whisper_device=whisper_device,
+                process_timeout_seconds=process_timeout_seconds,
+                section_diff_score=section_diff_score,
+                rights_basis=rights_basis,
+                source_owner=source_owner,
+                source_license=source_license,
+                commercial_use_allowed=commercial_use_allowed,
+                redistribution_allowed=redistribution_allowed,
+                export_intent=export_intent,
+            )
+        )
+    except (SkillCreationError, SkillExportError, ClaudeCliError, LiveVideoError, TutorialPlaybookError, SkillSynthesisError) as exc:
+        return _skill_creation_error_payload(exc)
+
+
+@mcp.tool(
+    name="create_skill_from_web_page",
+    description=(
+        "One-shot Skillmint pipeline for a static HTML page: capture readable main content, "
+        "distill it, compose a .claude asset, and by default finalize it deterministically."
+    ),
+)
+def create_skill_from_web_page_tool(
+    url: str,
+    skill_name: str,
+    playbook_name: str | None = None,
+    summary: str | None = None,
+    shape: str = "skill",
+    trigger_description: str | None = None,
+    scope_notes: str | None = None,
+    owner_agent: str | None = None,
+    overwrite: bool = False,
+    skills_root: str | None = None,
+    target: str = "claude_code",
+    codify: bool = True,
+    codify_provider: str = "deterministic",
+    codify_timeout_seconds: float = 600.0,
+    validate: bool = False,
+    validation_timeout_seconds: float = 300.0,
+    keep_validation_sandbox: bool = False,
+    require_certification: bool = False,
+    timeout_seconds: float = 30.0,
+    render_javascript: bool = False,
+    section_diff_score: float = 60.0,
+    rights_basis: str = "unknown",
+    source_owner: str | None = None,
+    source_license: str | None = None,
+    commercial_use_allowed: bool | None = None,
+    redistribution_allowed: bool | None = None,
+    export_intent: str = "private",
+) -> str:
+    try:
+        return _json_payload(
+            create_skill_from_web_page(
+                url,
+                skill_name,
+                playbook_name=playbook_name,
+                summary=summary,
+                shape=shape,
+                trigger_description=trigger_description,
+                scope_notes=scope_notes,
+                owner_agent=owner_agent,
+                overwrite=overwrite,
+                skills_root=skills_root,
+                target=target,
+                codify=codify,
+                codify_provider=codify_provider,
+                codify_timeout_seconds=codify_timeout_seconds,
+                validate=validate,
+                validation_timeout_seconds=validation_timeout_seconds,
+                keep_validation_sandbox=keep_validation_sandbox,
+                require_certification=require_certification,
+                timeout_seconds=timeout_seconds,
+                render_javascript=render_javascript,
+                section_diff_score=section_diff_score,
+                rights_basis=rights_basis,
+                source_owner=source_owner,
+                source_license=source_license,
+                commercial_use_allowed=commercial_use_allowed,
+                redistribution_allowed=redistribution_allowed,
+                export_intent=export_intent,
+            )
+        )
+    except (SkillCreationError, SkillExportError, ClaudeCliError, TutorialPlaybookError, SkillSynthesisError) as exc:
+        return _skill_creation_error_payload(exc)
+
+
+@mcp.tool(
+    name="create_skill_from_pdf",
+    description=(
+        "One-shot Skillmint pipeline for a local text-extractable PDF: capture pages, distill, "
+        "compose a .claude asset, and by default finalize it deterministically. No OCR."
+    ),
+)
+def create_skill_from_pdf_tool(
+    path: str,
+    skill_name: str,
+    playbook_name: str | None = None,
+    summary: str | None = None,
+    shape: str = "skill",
+    trigger_description: str | None = None,
+    scope_notes: str | None = None,
+    owner_agent: str | None = None,
+    overwrite: bool = False,
+    skills_root: str | None = None,
+    target: str = "claude_code",
+    codify: bool = True,
+    codify_provider: str = "deterministic",
+    codify_timeout_seconds: float = 600.0,
+    validate: bool = False,
+    validation_timeout_seconds: float = 300.0,
+    keep_validation_sandbox: bool = False,
+    require_certification: bool = False,
+    page_range: list[int] | None = None,
+    ocr: bool = False,
+    section_diff_score: float = 60.0,
+    rights_basis: str = "unknown",
+    source_owner: str | None = None,
+    source_license: str | None = None,
+    commercial_use_allowed: bool | None = None,
+    redistribution_allowed: bool | None = None,
+    export_intent: str = "private",
+) -> str:
+    if page_range is not None and len(page_range) != 2:
+        return _skill_creation_error_payload(
+            SkillCreationError("page_range must be a 2-element list [start, end]")
+        )
+    pr = tuple(page_range) if page_range else None
+    try:
+        return _json_payload(
+            create_skill_from_pdf(
+                path,
+                skill_name,
+                playbook_name=playbook_name,
+                summary=summary,
+                shape=shape,
+                trigger_description=trigger_description,
+                scope_notes=scope_notes,
+                owner_agent=owner_agent,
+                overwrite=overwrite,
+                skills_root=skills_root,
+                target=target,
+                codify=codify,
+                codify_provider=codify_provider,
+                codify_timeout_seconds=codify_timeout_seconds,
+                validate=validate,
+                validation_timeout_seconds=validation_timeout_seconds,
+                keep_validation_sandbox=keep_validation_sandbox,
+                require_certification=require_certification,
+                page_range=pr,
+                ocr=ocr,
+                section_diff_score=section_diff_score,
+                rights_basis=rights_basis,
+                source_owner=source_owner,
+                source_license=source_license,
+                commercial_use_allowed=commercial_use_allowed,
+                redistribution_allowed=redistribution_allowed,
+                export_intent=export_intent,
+            )
+        )
+    except (SkillCreationError, SkillExportError, ClaudeCliError, TutorialPlaybookError, SkillSynthesisError) as exc:
+        return _skill_creation_error_payload(exc)
+
+
+@mcp.tool(
+    name="create_skill_from_documentation_site",
+    description=(
+        "One-shot Skillmint pipeline for a static documentation site: BFS-crawl pages, distill, "
+        "compose a .claude asset, and by default finalize it deterministically."
+    ),
+)
+def create_skill_from_documentation_site_tool(
+    url: str,
+    skill_name: str,
+    playbook_name: str | None = None,
+    summary: str | None = None,
+    shape: str = "skill",
+    trigger_description: str | None = None,
+    scope_notes: str | None = None,
+    owner_agent: str | None = None,
+    overwrite: bool = False,
+    skills_root: str | None = None,
+    target: str = "claude_code",
+    codify: bool = True,
+    codify_provider: str = "deterministic",
+    codify_timeout_seconds: float = 600.0,
+    validate: bool = False,
+    validation_timeout_seconds: float = 300.0,
+    keep_validation_sandbox: bool = False,
+    require_certification: bool = False,
+    max_pages: int = 30,
+    same_origin_only: bool = True,
+    url_pattern: str | None = None,
+    timeout_seconds: float = 30.0,
+    section_diff_score: float = 60.0,
+    rights_basis: str = "unknown",
+    source_owner: str | None = None,
+    source_license: str | None = None,
+    commercial_use_allowed: bool | None = None,
+    redistribution_allowed: bool | None = None,
+    export_intent: str = "private",
+) -> str:
+    try:
+        return _json_payload(
+            create_skill_from_documentation_site(
+                url,
+                skill_name,
+                playbook_name=playbook_name,
+                summary=summary,
+                shape=shape,
+                trigger_description=trigger_description,
+                scope_notes=scope_notes,
+                owner_agent=owner_agent,
+                overwrite=overwrite,
+                skills_root=skills_root,
+                target=target,
+                codify=codify,
+                codify_provider=codify_provider,
+                codify_timeout_seconds=codify_timeout_seconds,
+                validate=validate,
+                validation_timeout_seconds=validation_timeout_seconds,
+                keep_validation_sandbox=keep_validation_sandbox,
+                require_certification=require_certification,
+                max_pages=max_pages,
+                same_origin_only=same_origin_only,
+                url_pattern=url_pattern,
+                timeout_seconds=timeout_seconds,
+                section_diff_score=section_diff_score,
+                rights_basis=rights_basis,
+                source_owner=source_owner,
+                source_license=source_license,
+                commercial_use_allowed=commercial_use_allowed,
+                redistribution_allowed=redistribution_allowed,
+                export_intent=export_intent,
+            )
+        )
+    except (SkillCreationError, SkillExportError, ClaudeCliError, TutorialPlaybookError, SkillSynthesisError) as exc:
+        return _skill_creation_error_payload(exc)
+
+
+@mcp.tool(
+    name="export_skill_asset",
+    description=(
+        "Export an existing Skillmint/Claude-style markdown asset to another agent format. "
+        "Targets: claude_code (no-op/native), codex (.agents/skills/<slug>/SKILL.md), "
+        "cursor (.cursor/rules/<slug>.mdc), windsurf (.windsurf/rules/<slug>.md), "
+        "or markdown (.skillmint/exports/markdown/<slug>.md)."
+    ),
+)
+def export_skill_asset_tool(
+    source_path: str,
+    target: str,
+    skill_name: str | None = None,
+    project_root: str | None = None,
+    overwrite: bool = False,
+    shape: str = "skill",
+) -> str:
+    try:
+        return _json_payload(
+            export_skill_asset(
+                source_path,
+                target=target,
+                skill_name=skill_name,
+                project_root=project_root,
+                overwrite=overwrite,
+                shape=shape,
+            )
+        )
+    except SkillExportError as exc:
+        return _skill_creation_error_payload(exc)
 
 
 # ---------------------------------------------------------------------------
@@ -319,6 +914,9 @@ def capture_youtube_video_to_playbook_tool(
     max_height: int = 480,
     download_timeout_seconds: float = 1800.0,
     process_timeout_seconds: float = 1800.0,
+    transcribe: bool = True,
+    whisper_model: str = "base",
+    whisper_device: str = "auto",
 ) -> str:
     langs = tuple(caption_languages) if caption_languages else ("en",)
     try:
@@ -335,6 +933,62 @@ def capture_youtube_video_to_playbook_tool(
                 summary=summary,
                 max_height=max_height,
                 download_timeout_seconds=download_timeout_seconds,
+                process_timeout_seconds=process_timeout_seconds,
+                transcribe=transcribe,
+                whisper_model=whisper_model,
+                whisper_device=whisper_device,
+            )
+        )
+    except LiveVideoError as exc:
+        return _live_video_error_payload(exc)
+    except TutorialPlaybookError as exc:
+        return _tutorial_playbook_error_payload(exc)
+
+
+@mcp.tool(
+    name="capture_local_video_to_playbook",
+    description=(
+        "Local-file counterpart to capture_youtube_video_to_playbook: decode a video file "
+        "already on disk through ffmpeg at full speed, run keyframe diff + step extraction, "
+        "and persist the result as a named tutorial playbook. No download step, no yt-dlp. "
+        "Captions come from one of: an explicit captions_path sidecar (VTT/SRT/json3), "
+        "automatic transcription via faster-whisper when transcribe=True (default) and no "
+        "sidecar, or none at all. Whisper auto-detects CUDA (float16) and falls back to CPU "
+        "(int8). Use for purchased courses, screen recordings, or internal training."
+    ),
+)
+def capture_local_video_to_playbook_tool(
+    local_path: str,
+    name: str,
+    fps: float = 1.0,
+    frame_width: int = 480,
+    keyframe_diff_threshold: float = 12.0,
+    min_step_seconds: float = 1.5,
+    captions_path: str | None = None,
+    caption_language: str = "en",
+    transcribe: bool = True,
+    whisper_model: str = "base",
+    whisper_device: str = "auto",
+    overwrite: bool = False,
+    summary: str | None = None,
+    process_timeout_seconds: float = 1800.0,
+) -> str:
+    try:
+        return _json_payload(
+            capture_local_video_to_playbook(
+                local_path,
+                name,
+                fps=fps,
+                frame_width=frame_width,
+                keyframe_diff_threshold=keyframe_diff_threshold,
+                min_step_seconds=min_step_seconds,
+                captions_path=captions_path,
+                caption_language=caption_language,
+                transcribe=transcribe,
+                whisper_model=whisper_model,
+                whisper_device=whisper_device,
+                overwrite=overwrite,
+                summary=summary,
                 process_timeout_seconds=process_timeout_seconds,
             )
         )
@@ -466,8 +1120,9 @@ def distill_tutorial_playbook_tool(
         "skills, decision gates, data flow, and rollback — opt-in only via shape='workflow'). "
         "All scaffolds ship with governance section stubs (typed Inputs/Outputs, Success "
         "criteria, Failure modes, Dependencies for skills; Owned skills, Constraints, Error "
-        "handling for agents; Steps/Decision gates/Data flow/Rollback for workflows) that the "
-        "current Claude session fills in via /codify. Pass shape='skill'|'agent'|'workflow' to "
+        "handling for agents; Steps/Decision gates/Data flow/Rollback for workflows). The one-shot "
+        "creation tools finalize these automatically; direct callers can run codify_scaffold with "
+        "provider='deterministic'. Pass shape='skill'|'agent'|'workflow' to "
         "override the heuristic. Pass owner_agent='<name>' to set the workflow's dispatch entry "
         "point (workflow shape only; ignored otherwise). Pass overwrite=true to replace an "
         "existing scaffold. Pass scope_notes to attach author-supplied constraints."
@@ -512,7 +1167,7 @@ def compose_skill_scaffold_from_playbook_tool(
         "split it into heading-based sections, and persist as a Skillmint playbook. Use for "
         "setup guides, single-page references, blog tutorials, and other one-URL training "
         "material. The resulting playbook is consumed by distill_tutorial_playbook -> "
-        "compose_skill_scaffold_from_playbook -> /codify exactly like a YouTube playbook."
+        "compose_skill_scaffold_from_playbook -> deterministic codify exactly like a YouTube playbook."
     ),
 )
 def capture_web_page_to_playbook_tool(
@@ -521,6 +1176,7 @@ def capture_web_page_to_playbook_tool(
     summary: str | None = None,
     overwrite: bool = False,
     timeout_seconds: float = 30.0,
+    render_javascript: bool = False,
 ) -> str:
     try:
         return _json_payload(
@@ -530,6 +1186,7 @@ def capture_web_page_to_playbook_tool(
                 summary=summary,
                 overwrite=overwrite,
                 timeout_seconds=timeout_seconds,
+                render_javascript=render_javascript,
             )
         )
     except TutorialPlaybookError as exc:
@@ -552,6 +1209,7 @@ def capture_pdf_to_playbook_tool(
     summary: str | None = None,
     overwrite: bool = False,
     page_range: list[int] | None = None,
+    ocr: bool = False,
 ) -> str:
     if page_range is not None and len(page_range) != 2:
         return _tutorial_playbook_error_payload(
@@ -566,6 +1224,7 @@ def capture_pdf_to_playbook_tool(
                 summary=summary,
                 overwrite=overwrite,
                 page_range=pr,
+                ocr=ocr,
             )
         )
     except TutorialPlaybookError as exc:
@@ -608,6 +1267,45 @@ def capture_documentation_site_to_playbook_tool(
         )
     except TutorialPlaybookError as exc:
         return _tutorial_playbook_error_payload(exc)
+
+
+# ---------------------------------------------------------------------------
+# Skill validation
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool(
+    name="validate_skill",
+    description=(
+        "Execute a saved Skillmint-produced skill against its declared `## Success criteria` "
+        "in a sandbox tempdir, spawning `claude -p` to play the role of the executor. Returns "
+        "per-criterion pass/fail with one-line evidence so callers can grade a skill instead "
+        "of trusting it blindly. Looks up `<cwd>/.claude/skills/<slug>/SKILL.md` first, then "
+        "`~/.claude/skills/<slug>/SKILL.md`. Pass sample_inputs to override the deterministic "
+        "defaults derived from the skill's YAML inputs: schema. No Anthropic SDK; the spawn "
+        "uses your existing Claude Code CLI subscription. Sandbox is removed after the run "
+        "unless keep_sandbox=true."
+    ),
+)
+def validate_skill_tool(
+    skill_name: str,
+    sample_inputs: dict | None = None,
+    keep_sandbox: bool = False,
+    timeout_seconds: float = 300.0,
+    skills_root: str | None = None,
+) -> str:
+    try:
+        return _json_payload(
+            validate_skill(
+                skill_name,
+                sample_inputs=sample_inputs,
+                keep_sandbox=keep_sandbox,
+                timeout_seconds=timeout_seconds,
+                skills_root=skills_root,
+            )
+        )
+    except (SkillValidationError, ClaudeCliError) as exc:
+        return _skill_validation_error_payload(exc)
 
 
 # ---------------------------------------------------------------------------

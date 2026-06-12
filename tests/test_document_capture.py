@@ -34,6 +34,7 @@ from skillmint.document_capture import (  # noqa: E402
     _strip_noise,
     _parse_html,
 )
+import skillmint.document_capture as dc  # noqa: E402
 from skillmint.tutorial_playbooks import TutorialPlaybookError  # noqa: E402
 
 
@@ -147,6 +148,35 @@ def test_capture_web_page_writes_playbook(monkeypatch, tmp_path):
     assert "![Step" not in transcript  # no image links since no keyframes.
 
 
+def test_capture_web_page_can_use_rendered_html(monkeypatch):
+    captured: dict = {}
+
+    def fake_render(url: str, *, timeout: float):
+        captured["url"] = url
+        captured["timeout"] = timeout
+        return (
+            "https://example.com/rendered",
+            "text/html; rendered=playwright",
+            SAMPLE_HTML.encode("utf-8"),
+        )
+
+    monkeypatch.setattr(dc, "_fetch_rendered_html", fake_render)
+
+    result = capture_web_page_to_playbook(
+        url="https://example.com/app",
+        name="rendered-page",
+        overwrite=True,
+        timeout_seconds=12.0,
+        render_javascript=True,
+    )
+
+    assert result["ok"] is True
+    assert captured == {"url": "https://example.com/app", "timeout": 12.0}
+    manifest = json.loads((Path(result["directory"]) / "manifest.json").read_text())
+    assert manifest["sourceUrl"] == "https://example.com/rendered"
+    assert manifest["captureConfig"]["renderJavascript"] is True
+
+
 def test_capture_web_page_rejects_non_html(monkeypatch):
     def fake_get(self, url, *args, **kwargs):
         return httpx.Response(
@@ -252,6 +282,46 @@ def test_capture_pdf_writes_playbook(tmp_path):
     transcript = (pb_dir / "transcript.md").read_text()
     assert "Tiny PDF Title" in transcript
     assert "Page Two" in transcript
+
+
+def test_capture_pdf_can_ocr_empty_pages(monkeypatch, tmp_path):
+    pdf_path = tmp_path / "scanned.pdf"
+    pdf_path.write_bytes(b"%PDF-1.7 fake")
+
+    class FakePage:
+        def extract_text(self):
+            return ""
+
+    class FakePdf:
+        pages = [FakePage()]
+        metadata = {"Title": "Scanned Manual"}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    monkeypatch.setattr(dc.pdfplumber, "open", lambda path: FakePdf())
+    monkeypatch.setattr(
+        dc,
+        "_ocr_pdf_page",
+        lambda page, *, pdf_path, page_number: "OCR extracted page text.",
+    )
+
+    result = capture_pdf_to_playbook(
+        path=pdf_path,
+        name="scanned-manual",
+        overwrite=True,
+        ocr=True,
+    )
+
+    assert result["ok"] is True
+    pb_dir = Path(result["directory"])
+    manifest = json.loads((pb_dir / "manifest.json").read_text())
+    assert manifest["captureConfig"]["ocr"] is True
+    assert manifest["captureConfig"]["ocrPages"] == [1]
+    assert "OCR extracted page text." in (pb_dir / "transcript.md").read_text()
 
 
 def test_capture_pdf_rejects_missing_file(tmp_path):

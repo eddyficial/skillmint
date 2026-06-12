@@ -171,6 +171,7 @@ def persist_playbook_from_snapshot(
                     "keyframeByteLength": len(jpeg),
                     "transcriptText": step.get("transcriptText") or "",
                     "captionText": step.get("captionText") or "",
+                    "visualAction": step.get("visualAction"),
                 }
             )
 
@@ -242,6 +243,18 @@ def _render_transcript_markdown(
         if step.get("captionText"):
             lines.append("")
             lines.append(f"_Captions:_ {step['captionText']}")
+        visual_action = step.get("visualAction") or {}
+        if visual_action:
+            lines.append("")
+            lines.append(
+                "_Visual action:_ "
+                f"{visual_action.get('actionType', 'unknown')} "
+                f"(confidence {visual_action.get('confidence', 0)})"
+            )
+            ocr = visual_action.get("ocr") or {}
+            if ocr.get("visibleTextSample"):
+                lines.append("")
+                lines.append(f"_Visible text:_ {ocr['visibleTextSample']}")
         lines.append("")
         if step.get("keyframeRelativePath"):
             lines.append(f"![Step {step['ordinal']}]({step['keyframeRelativePath']})")
@@ -352,6 +365,7 @@ def _build_sections_from_steps(
                 "trigger": trigger,
                 "anchorKeyframePath": step.get("keyframeRelativePath"),
                 "stepOrdinals": [step.get("ordinal")],
+                "visualActions": _visual_actions_for_step(step),
                 "_cleaned_parts": [_clean_caption_text(step.get("captionText") or "")],
             }
             sections.append(current)
@@ -359,6 +373,7 @@ def _build_sections_from_steps(
             assert current is not None
             current["stepOrdinals"].append(step.get("ordinal"))
             current["videoEndSeconds"] = step.get("videoEndSeconds") or current.get("videoEndSeconds")
+            current["visualActions"].extend(_visual_actions_for_step(step))
             current["_cleaned_parts"].append(_clean_caption_text(step.get("captionText") or ""))
     # Collapse internal helper field into the public "text".
     for section in sections:
@@ -366,6 +381,27 @@ def _build_sections_from_steps(
         section["text"] = text
         section["wordCount"] = len(text.split()) if text else 0
     return sections
+
+
+def _visual_actions_for_step(step: dict[str, Any]) -> list[dict[str, Any]]:
+    action = step.get("visualAction")
+    if not isinstance(action, dict):
+        return []
+    return [
+        {
+            "stepOrdinal": step.get("ordinal"),
+            "videoStartSeconds": step.get("videoStartSeconds"),
+            "videoEndSeconds": step.get("videoEndSeconds"),
+            "actionType": action.get("actionType") or "unknown",
+            "confidence": action.get("confidence"),
+            "changedRatio": action.get("changedRatio"),
+            "changedRegion": action.get("changedRegion"),
+            "changedZones": action.get("changedZones") or [],
+            "visibleTextSample": (action.get("ocr") or {}).get("visibleTextSample") or "",
+            "addedTextSample": (action.get("ocr") or {}).get("addedTextSample") or "",
+            "observations": action.get("observations") or [],
+        }
+    ]
 
 
 def _render_lessons_markdown(
@@ -396,6 +432,22 @@ def _render_lessons_markdown(
         lines.append("")
         if section.get("anchorKeyframePath"):
             lines.append(f"![Section {section['ordinal']}]({section['anchorKeyframePath']})")
+            lines.append("")
+        visual_actions = section.get("visualActions") or []
+        if visual_actions:
+            lines.append("**Visual actions:**")
+            lines.append("")
+            for action in visual_actions[:8]:
+                detail = action.get("visibleTextSample") or "; ".join(action.get("observations") or [])
+                if detail:
+                    detail = f" - {detail}"
+                lines.append(
+                    f"- Step {action.get('stepOrdinal')}: "
+                    f"{action.get('actionType', 'unknown')} "
+                    f"(confidence {action.get('confidence', 0)}){detail}"
+                )
+            if len(visual_actions) > 8:
+                lines.append(f"- Plus {len(visual_actions) - 8} additional visual actions.")
             lines.append("")
         if section.get("text"):
             lines.append(section["text"])

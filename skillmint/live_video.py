@@ -26,6 +26,8 @@ from collections import deque
 from dataclasses import dataclass, field
 from typing import Any
 
+from .visual_actions import analyze_visual_action
+
 DEFAULT_FRAME_RING_SIZE = 60
 DEFAULT_FPS = 2.0
 MAX_FPS = 30.0
@@ -112,6 +114,7 @@ class _StepRecord:
     transcript_text: str
     caption_text: str
     seconds_since_previous: float
+    visual_action: dict[str, Any] | None = None
 
 
 @dataclass
@@ -154,6 +157,7 @@ class _Session:
     last_caption_at: float | None = None
     last_step_at: float | None = None
     last_keyframe_thumb: bytes | None = None
+    last_step_keyframe_jpeg: bytes | None = None
     last_step_consumed_transcript_seq: int = 0
     last_step_consumed_caption_seq: int = 0
     last_frame_error: str | None = None
@@ -241,6 +245,12 @@ class _Session:
                 for caption in self.captions
                 if caption.sequence > self.last_step_consumed_caption_seq
             ).strip()
+            visual_action = analyze_visual_action(
+                self.last_step_keyframe_jpeg,
+                record.jpeg_bytes,
+                diff_score=diff_score if diff_score != float("inf") else None,
+                ocr_enabled=False,
+            )
             step = _StepRecord(
                 sequence=self.next_step_sequence,
                 started_at=previous_at,
@@ -253,12 +263,14 @@ class _Session:
                 transcript_text=transcript_text,
                 caption_text=caption_text,
                 seconds_since_previous=elapsed,
+                visual_action=visual_action,
             )
             self.next_step_sequence += 1
             self.steps.append(step)
             while len(self.steps) > self.config.ring_size:
                 self.steps.popleft()
             self.last_step_at = now
+            self.last_step_keyframe_jpeg = record.jpeg_bytes
             if self.transcripts:
                 self.last_step_consumed_transcript_seq = self.transcripts[-1].sequence
             if self.captions:
@@ -290,6 +302,12 @@ class _Session:
                 # Nothing new happened audibly either; don't spam empty steps.
                 return
             latest = self.frames[-1]
+            visual_action = analyze_visual_action(
+                self.last_step_keyframe_jpeg,
+                latest.jpeg_bytes,
+                diff_score=0.0,
+                ocr_enabled=False,
+            )
             step = _StepRecord(
                 sequence=self.next_step_sequence,
                 started_at=previous_at,
@@ -302,12 +320,14 @@ class _Session:
                 transcript_text=transcript_text,
                 caption_text=caption_text,
                 seconds_since_previous=elapsed,
+                visual_action=visual_action,
             )
             self.next_step_sequence += 1
             self.steps.append(step)
             while len(self.steps) > self.config.ring_size:
                 self.steps.popleft()
             self.last_step_at = now
+            self.last_step_keyframe_jpeg = latest.jpeg_bytes
             if self.transcripts:
                 self.last_step_consumed_transcript_seq = self.transcripts[-1].sequence
             if self.captions:
@@ -1557,6 +1577,7 @@ def follow_youtube_tutorial(
             },
             "transcript": step.transcript_text,
             "captions": step.caption_text,
+            "visualAction": step.visual_action,
         }
         if include_keyframe_bytes:
             entry["keyframe"]["jpegBase64"] = base64.b64encode(step.keyframe_jpeg).decode("ascii")
@@ -1627,6 +1648,7 @@ def get_session_step_snapshot(session_id: str) -> dict[str, Any]:
                 "keyframeHeight": step.keyframe_height,
                 "transcriptText": step.transcript_text,
                 "captionText": step.caption_text,
+                "visualAction": step.visual_action,
             }
             for step in steps
         ],

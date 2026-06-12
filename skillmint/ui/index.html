@@ -1,0 +1,250 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Skillmint</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="/" aria-label="Skillmint">
+        <span class="brand-mark">SM</span>
+        <span>
+          <strong>Skillmint</strong>
+          <small>Source in. Skill out. Playbook optional.</small>
+        </span>
+      </a>
+      <div class="system-strip" id="systemStrip" aria-live="polite">
+        <span class="chip is-muted">Checking system</span>
+      </div>
+    </header>
+
+    <main class="workspace">
+      <section class="panel creator">
+        <div class="panel-head">
+          <div>
+            <p class="eyebrow">Create</p>
+            <h1>Mint an agent skill</h1>
+          </div>
+          <output id="formState" class="state-pill is-idle">Ready</output>
+        </div>
+
+        <form id="createForm" autocomplete="off">
+          <label class="field span-2" for="source">
+            <span>Source</span>
+            <textarea id="source" name="source" rows="3" required placeholder="https://youtu.be/..."></textarea>
+          </label>
+
+          <label class="field" for="skillName">
+            <span>Skill name</span>
+            <input id="skillName" name="skillName" placeholder="auto from source">
+          </label>
+
+          <label class="field" for="playbookName">
+            <span>Playbook name optional</span>
+            <input id="playbookName" name="playbookName" placeholder="vendor api deploy">
+          </label>
+
+          <label class="field" for="rightsBasis">
+            <span>Rights basis</span>
+            <select id="rightsBasis" name="rightsBasis" required>
+              <option value="">Select rights basis</option>
+              <option value="owned">Owned by me or my organization</option>
+              <option value="licensed">Licensed for this use</option>
+              <option value="internal">Internal SOP or documentation</option>
+              <option value="user_attested_permission">I have permission</option>
+              <option value="creative_commons">Creative Commons</option>
+              <option value="public_domain">Public domain</option>
+              <option value="fair_use">Fair use review</option>
+            </select>
+          </label>
+
+          <label class="field" for="exportIntent">
+            <span>Export intent</span>
+            <select id="exportIntent" name="exportIntent">
+              <option value="private">Private/local</option>
+              <option value="internal">Internal/team</option>
+              <option value="public">Public/open source</option>
+              <option value="commercial">Commercial</option>
+            </select>
+          </label>
+
+          <label class="field" for="sourceType">
+            <span>Source type</span>
+            <select id="sourceType" name="sourceType">
+              <option value="auto">Auto</option>
+              <option value="youtube_video">YouTube</option>
+              <option value="local_video">Local video</option>
+              <option value="web_page">Web page</option>
+              <option value="pdf">PDF</option>
+              <option value="documentation_site">Docs site</option>
+            </select>
+          </label>
+
+          <label class="field" for="shape">
+            <span>Asset shape</span>
+            <select id="shape" name="shape">
+              <option value="skill">Skill</option>
+            </select>
+          </label>
+
+          <fieldset class="target-field span-2">
+            <legend>Export target</legend>
+            <div class="target-options" id="targetOptions"></div>
+          </fieldset>
+
+          <div class="toggle-row span-2">
+            <label class="toggle">
+              <input type="checkbox" name="overwrite">
+              <span>Overwrite existing asset</span>
+            </label>
+            <label class="toggle">
+              <input type="checkbox" name="keepPlaybook" checked>
+              <span>Keep playbook</span>
+            </label>
+            <label class="toggle">
+              <input type="checkbox" name="sameOriginOnly" checked>
+              <span>Same-origin crawl</span>
+            </label>
+          </div>
+
+          <details class="advanced span-2">
+            <summary>Source controls</summary>
+            <div class="advanced-grid">
+              <label class="field" for="summary">
+                <span>Summary</span>
+                <textarea id="summary" name="summary" rows="3"></textarea>
+              </label>
+              <label class="field" for="scopeNotes">
+                <span>Scope notes</span>
+                <textarea id="scopeNotes" name="scopeNotes" rows="3"></textarea>
+              </label>
+              <label class="field" for="triggerDescription">
+                <span>Trigger phrase</span>
+                <input id="triggerDescription" name="triggerDescription">
+              </label>
+              <label class="field" for="ownerAgent">
+                <span>Owner agent</span>
+                <input id="ownerAgent" name="ownerAgent">
+              </label>
+              <label class="field" for="skillsRoot">
+                <span>Project root</span>
+                <input id="skillsRoot" name="skillsRoot" placeholder="C:\path\to\project">
+              </label>
+              <label class="field" for="sourceOwner">
+                <span>Source owner</span>
+                <input id="sourceOwner" name="sourceOwner" placeholder="creator, vendor, team, or company">
+              </label>
+              <label class="field" for="sourceLicense">
+                <span>Source license</span>
+                <input id="sourceLicense" name="sourceLicense" placeholder="MIT, CC BY, internal, contract, etc.">
+              </label>
+              <label class="field" for="codifyProvider">
+                <span>Finalize provider</span>
+                <select id="codifyProvider" name="codifyProvider">
+                  <option value="deterministic">Deterministic</option>
+                  <option value="claude_cli">Claude CLI</option>
+                </select>
+              </label>
+              <label class="field" for="validationTimeoutSeconds">
+                <span>Validation timeout</span>
+                <input id="validationTimeoutSeconds" name="validationTimeoutSeconds" type="number" min="1" step="1">
+              </label>
+              <label class="toggle compact">
+                <input type="checkbox" name="keepValidationSandbox">
+                <span>Keep validation sandbox</span>
+              </label>
+              <label class="field" for="urlPattern">
+                <span>URL pattern</span>
+                <input id="urlPattern" name="urlPattern" placeholder="/docs/">
+              </label>
+              <label class="field" for="maxPages">
+                <span>Max pages</span>
+                <input id="maxPages" name="maxPages" type="number" min="1" step="1">
+              </label>
+              <label class="field" for="timeoutSeconds">
+                <span>Fetch timeout</span>
+                <input id="timeoutSeconds" name="timeoutSeconds" type="number" min="1" step="1">
+              </label>
+              <label class="field" for="pageStart">
+                <span>PDF start page</span>
+                <input id="pageStart" name="pageStart" type="number" min="1" step="1">
+              </label>
+              <label class="field" for="pageEnd">
+                <span>PDF end page</span>
+                <input id="pageEnd" name="pageEnd" type="number" min="1" step="1">
+              </label>
+              <label class="field" for="fps">
+                <span>Video FPS</span>
+                <input id="fps" name="fps" type="number" min="0.1" step="0.1">
+              </label>
+              <label class="field" for="frameWidth">
+                <span>Frame width</span>
+                <input id="frameWidth" name="frameWidth" type="number" min="160" step="1">
+              </label>
+              <label class="field" for="captionsPath">
+                <span>Captions path</span>
+                <input id="captionsPath" name="captionsPath">
+              </label>
+              <label class="field" for="captionLanguages">
+                <span>Caption languages</span>
+                <input id="captionLanguages" name="captionLanguages" placeholder="en,es">
+              </label>
+              <label class="toggle compact">
+                <input type="checkbox" name="transcribe" checked>
+                <span>Transcribe when captions are missing</span>
+              </label>
+            </div>
+          </details>
+
+          <div class="actions span-2">
+            <button class="primary" type="submit">Create skill</button>
+            <button class="ghost" type="reset">Clear</button>
+          </div>
+        </form>
+      </section>
+
+      <section class="panel output">
+        <div class="panel-head">
+          <div>
+            <p class="eyebrow">Run</p>
+            <h2>Build output</h2>
+          </div>
+          <output id="jobState" class="state-pill is-idle">No job</output>
+        </div>
+
+        <div class="pipeline" id="pipeline" aria-label="Pipeline status">
+          <span data-step="capture">Capture</span>
+          <span data-step="distill">Distill</span>
+          <span data-step="compose">Compose</span>
+          <span data-step="export">Export</span>
+        </div>
+
+        <div id="artifactList" class="artifact-list empty">
+          <p>No run selected.</p>
+        </div>
+
+        <div class="split-block">
+          <div>
+            <div class="section-head">
+              <h3>Recent jobs</h3>
+              <button class="ghost small" id="refreshJobs" type="button">Refresh</button>
+            </div>
+            <div id="jobsList" class="rows"></div>
+          </div>
+
+          <div>
+            <div class="section-head">
+              <h3>Playbooks</h3>
+              <button class="ghost small" id="refreshPlaybooks" type="button">Refresh</button>
+            </div>
+            <div id="playbooksList" class="rows"></div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <script src="/app.js" defer></script>
+  </body>
+</html>

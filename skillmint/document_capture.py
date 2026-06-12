@@ -57,6 +57,35 @@ def _fetch_url(url: str, *, timeout: float = _HTTP_DEFAULT_TIMEOUT) -> tuple[str
         return str(response.url), response.headers.get("content-type", ""), response.content
 
 
+def _fetch_rendered_html(url: str, *, timeout: float = _HTTP_DEFAULT_TIMEOUT) -> tuple[str, str, bytes]:
+    """Render a JavaScript page and return (final_url, content_type, html_bytes)."""
+    try:
+        from playwright.sync_api import Error as PlaywrightError
+        from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+        from playwright.sync_api import sync_playwright
+    except ImportError as exc:
+        raise TutorialPlaybookError(
+            "Playwright is required for render_javascript=True; install the optional "
+            "browser runtime before capturing JS-rendered pages."
+        ) from exc
+
+    timeout_ms = max(1, int(timeout * 1000))
+    try:
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(headless=True)
+            try:
+                page = browser.new_page()
+                try:
+                    page.goto(url, wait_until="networkidle", timeout=timeout_ms)
+                except PlaywrightTimeoutError:
+                    page.goto(url, wait_until="load", timeout=timeout_ms)
+                return page.url, "text/html; rendered=playwright", page.content().encode("utf-8")
+            finally:
+                browser.close()
+    except PlaywrightError as exc:
+        raise TutorialPlaybookError(f"failed to render JavaScript page: {exc}") from exc
+
+
 def _parse_html(html_bytes: bytes) -> lxml_html.HtmlElement:
     return lxml_html.fromstring(html_bytes)
 
@@ -252,6 +281,7 @@ def capture_web_page_to_playbook(
     summary: str | None = None,
     overwrite: bool = False,
     timeout_seconds: float = _HTTP_DEFAULT_TIMEOUT,
+    render_javascript: bool = False,
 ) -> dict[str, Any]:
     """Fetch a single HTML page, extract main content, write a playbook.
 
@@ -261,7 +291,10 @@ def capture_web_page_to_playbook(
     if not url:
         raise TutorialPlaybookError("url is required")
 
-    final_url, content_type, body = _fetch_url(url, timeout=timeout_seconds)
+    if render_javascript:
+        final_url, content_type, body = _fetch_rendered_html(url, timeout=timeout_seconds)
+    else:
+        final_url, content_type, body = _fetch_url(url, timeout=timeout_seconds)
     if "html" not in content_type.lower() and not body.lstrip().startswith(b"<"):
         raise TutorialPlaybookError(
             f"URL did not return HTML (content-type: {content_type}); "
@@ -289,7 +322,12 @@ def capture_web_page_to_playbook(
         "sessionId": None,
         "url": final_url,
         "video": {"title": page_title, "channel": _origin_label(final_url)},
-        "config": {"sourceKind": "web_page", "originalUrl": url, "fetchedAt": _now_iso()},
+        "config": {
+            "sourceKind": "web_page",
+            "originalUrl": url,
+            "renderJavascript": render_javascript,
+            "fetchedAt": _now_iso(),
+        },
         "steps": steps,
         "fullTranscriptText": markdown,
     }
@@ -308,6 +346,7 @@ def capture_pdf_to_playbook(
     summary: str | None = None,
     overwrite: bool = False,
     page_range: tuple[int, int] | None = None,
+    ocr: bool = False,
 ) -> dict[str, Any]:
     """Extract text from a local PDF and persist as a playbook.
 
@@ -321,6 +360,7 @@ def capture_pdf_to_playbook(
 
     steps: list[dict[str, Any]] = []
     full_text_parts: list[str] = []
+    ocr_pages: list[int] = []
     pdf_title: str = pdf_path.stem
 
     with pdfplumber.open(pdf_path) as pdf:
@@ -334,6 +374,10 @@ def capture_pdf_to_playbook(
         for i, page in enumerate(pages):
             page_no = start_page_number + i
             text = (page.extract_text() or "").strip()
+            if not text and ocr:
+                text = _ocr_pdf_page(page, pdf_path=pdf_path, page_number=page_no).strip()
+                if text:
+                    ocr_pages.append(page_no)
             if not text:
                 continue
             full_text_parts.append(f"## Page {page_no}\n\n{text}")
@@ -351,8 +395,9 @@ def capture_pdf_to_playbook(
             pdf_title = str(metadata["Title"]).strip() or pdf_title
 
     if not steps:
+        suffix = " even with OCR" if ocr else " (scanned image-only PDF? enable OCR)"
         raise TutorialPlaybookError(
-            "no text extracted from PDF (scanned image-only PDF? OCR support not implemented)"
+            f"no text extracted from PDF{suffix}"
         )
 
     snapshot = {
@@ -363,6 +408,8 @@ def capture_pdf_to_playbook(
             "sourceKind": "pdf",
             "sourcePath": str(pdf_path),
             "pageCount": len(steps),
+            "ocr": ocr,
+            "ocrPages": ocr_pages,
             "fetchedAt": _now_iso(),
         },
         "steps": steps,
@@ -374,6 +421,30 @@ def capture_pdf_to_playbook(
         overwrite=overwrite,
         summary=summary,
     )
+
+
+def _ocr_pdf_page(page: Any, *, pdf_path: Path, page_number: int) -> str:
+    """OCR one pdfplumber page when embedded text extraction is empty."""
+    try:
+        import pytesseract
+    except ImportError as exc:
+        raise TutorialPlaybookError(
+            "OCR was requested, but pytesseract is not installed."
+        ) from exc
+
+    try:
+        image = page.to_image(resolution=200).original
+    except Exception as exc:  # noqa: BLE001 - surface rendering backend failures clearly.
+        raise TutorialPlaybookError(
+            f"OCR was requested, but page {page_number} of {pdf_path} could not be rendered: {exc}"
+        ) from exc
+
+    try:
+        return str(pytesseract.image_to_string(image) or "")
+    except Exception as exc:  # noqa: BLE001 - tesseract binary/config errors vary by platform.
+        raise TutorialPlaybookError(
+            f"OCR failed on page {page_number} of {pdf_path}: {exc}"
+        ) from exc
 
 
 def capture_documentation_site_to_playbook(

@@ -262,6 +262,34 @@ def test_build_sections_groups_steps_by_quiet_and_diff() -> None:
     assert sections[2]["anchorKeyframePath"] == "keyframes/004.jpg"
 
 
+def test_build_sections_carries_visual_actions() -> None:
+    steps = [
+        {
+            "ordinal": 1,
+            "trigger": "keyframe",
+            "diffScore": None,
+            "videoStartSeconds": 0.0,
+            "videoEndSeconds": 1.0,
+            "captionText": "Open settings",
+            "keyframeRelativePath": "keyframes/001.jpg",
+            "visualAction": {
+                "actionType": "navigation_or_tool_change",
+                "confidence": 0.72,
+                "changedRatio": 0.1,
+                "changedRegion": {"x": 0, "y": 0, "width": 20, "height": 20},
+                "changedZones": ["top_bar"],
+                "ocr": {"visibleTextSample": "Settings"},
+                "observations": ["navigation or tool chrome changed"],
+            },
+        }
+    ]
+
+    sections = tp._build_sections_from_steps(steps)
+
+    assert sections[0]["visualActions"][0]["actionType"] == "navigation_or_tool_change"
+    assert sections[0]["visualActions"][0]["visibleTextSample"] == "Settings"
+
+
 def test_distill_tutorial_playbook_writes_lessons_files(tmp_path, monkeypatch) -> None:
     """End-to-end: a saved playbook gets a lessons.md + lessons.json after distill."""
     monkeypatch.setenv("SKILLMINT_PLAYBOOK_DIR", str(tmp_path))
@@ -276,6 +304,7 @@ def test_distill_tutorial_playbook_writes_lessons_files(tmp_path, monkeypatch) -
     payload = json.loads((target_dir / "lessons.json").read_text(encoding="utf-8"))
     assert payload["sectionCount"] == result["sectionCount"]
     assert len(payload["sections"]) == result["sectionCount"]
+    assert "visualActions" in payload["sections"][0]
 
 
 def test_distill_tutorial_playbook_unknown_name_raises() -> None:

@@ -7,6 +7,7 @@ synthetic JPEG bytes and a fake ffmpeg stdout stream.
 from __future__ import annotations
 
 import io
+import json
 import os
 import subprocess
 from typing import Any
@@ -114,6 +115,8 @@ def test_process_local_video_emits_step_per_keyframe(monkeypatch, tmp_path) -> N
     # 4 frames in: red (always-keyframe seed), red (no diff), green (diff), blue (diff)
     assert len(steps) == 3
     assert [s["sequence"] for s in steps] == [1, 2, 3]
+    assert steps[0]["visualAction"]["actionType"] == "initial_view"
+    assert steps[1]["visualAction"]["actionType"] in {"screen_transition", "layout_change"}
     assert steps[0]["videoStartSeconds"] == 0.0
     # Step 1 covers [0.0, 0.0) — no cues yet (seed frame); steps 2/3 should pick up cues.
     assert "second" in steps[1]["captionText"] or "first" in steps[1]["captionText"]
@@ -149,6 +152,190 @@ def test_capture_youtube_video_rejects_live_streams(monkeypatch) -> None:
         ovc.capture_youtube_video_to_playbook(
             "https://youtu.be/abc123", "fake-name", overwrite=True
         )
+
+
+def test_capture_local_video_rejects_missing_path(tmp_path) -> None:
+    """Missing file path must surface as a LiveVideoError, not a bare OSError."""
+    with pytest.raises(live_video.LiveVideoError, match="not found"):
+        ovc.capture_local_video_to_playbook(
+            str(tmp_path / "nope.mp4"), "fake-name", overwrite=True
+        )
+
+
+def test_capture_local_video_rejects_missing_captions(monkeypatch, tmp_path) -> None:
+    """Captions path mismatch must error early, before any ffmpeg work runs."""
+    video_path = tmp_path / "video.mp4"
+    video_path.write_bytes(b"fake-mp4-bytes")
+    with pytest.raises(live_video.LiveVideoError, match="captions_path"):
+        ovc.capture_local_video_to_playbook(
+            str(video_path),
+            "fake-name",
+            captions_path=str(tmp_path / "missing.vtt"),
+            overwrite=True,
+        )
+
+
+def test_capture_local_video_end_to_end_persists_playbook(monkeypatch, tmp_path) -> None:
+    """Local-file path: skips yt-dlp, decodes via ffmpeg, persists playbook with sidecar captions."""
+    video_path = tmp_path / "local.mp4"
+    video_path.write_bytes(b"fake-mp4-bytes")
+    captions_path = tmp_path / "local.vtt"
+    captions_path.write_text(
+        "WEBVTT\n\n"
+        "00:00:00.500 --> 00:00:01.000\nopening line\n\n"
+        "00:00:02.500 --> 00:00:03.000\nsecond line\n",
+        encoding="utf-8",
+    )
+
+    red = _make_jpeg((255, 0, 0))
+    green = _make_jpeg((0, 255, 0))
+    blue = _make_jpeg((0, 0, 255))
+    payload = red + green + blue
+    monkeypatch.setattr(ovc.subprocess, "Popen", lambda *a, **kw: _FakeProc(payload))
+    monkeypatch.setattr(ovc, "_require_executable", lambda name: "/fake/ffmpeg")
+
+    playbook_root = tmp_path / "playbooks"
+    monkeypatch.setenv("SKILLMINT_PLAYBOOK_DIR", str(playbook_root))
+
+    result = ovc.capture_local_video_to_playbook(
+        str(video_path),
+        name="local-test",
+        fps=1.0,
+        frame_width=64,
+        keyframe_diff_threshold=5.0,
+        min_step_seconds=0.5,
+        captions_path=str(captions_path),
+        overwrite=True,
+        summary="local unit test",
+    )
+    assert result["ok"] is True
+    assert result["stepCount"] >= 2
+    assert result["captionErrors"] == {}
+    playbook_dir = playbook_root / "local-test"
+    assert (playbook_dir / "manifest.json").exists()
+    assert (playbook_dir / "steps.json").exists()
+    assert (playbook_dir / "transcript.md").exists()
+    keyframes = sorted((playbook_dir / "keyframes").iterdir())
+    assert len(keyframes) == result["stepCount"]
+    steps_payload = json.loads((playbook_dir / "steps.json").read_text(encoding="utf-8"))
+    assert steps_payload["steps"][0]["visualAction"]["schema"] == "skillmint.visual_action.v1"
+
+
+def test_capture_local_video_works_without_captions(monkeypatch, tmp_path) -> None:
+    """transcribe=False with no captions_path = pure keyframes capture, no caption text."""
+    video_path = tmp_path / "silent.mp4"
+    video_path.write_bytes(b"fake-mp4-bytes")
+
+    red = _make_jpeg((255, 0, 0))
+    green = _make_jpeg((0, 255, 0))
+    monkeypatch.setattr(ovc.subprocess, "Popen", lambda *a, **kw: _FakeProc(red + green))
+    monkeypatch.setattr(ovc, "_require_executable", lambda name: "/fake/ffmpeg")
+
+    playbook_root = tmp_path / "playbooks"
+    monkeypatch.setenv("SKILLMINT_PLAYBOOK_DIR", str(playbook_root))
+
+    result = ovc.capture_local_video_to_playbook(
+        str(video_path),
+        name="silent-test",
+        fps=1.0,
+        frame_width=64,
+        keyframe_diff_threshold=5.0,
+        min_step_seconds=0.5,
+        transcribe=False,
+        overwrite=True,
+    )
+    assert result["ok"] is True
+    assert result["stepCount"] >= 1
+    assert result["whisper"] is None
+
+
+def test_capture_local_video_auto_transcribes_when_no_sidecar(monkeypatch, tmp_path) -> None:
+    """transcribe=True with no captions_path triggers _transcribe_audio_to_cues; cues land on steps."""
+    video_path = tmp_path / "talking.mp4"
+    video_path.write_bytes(b"fake-mp4-bytes")
+
+    fake_cues = [
+        {"startSeconds": 0.0, "endSeconds": 1.0, "text": "welcome to sql"},
+        {"startSeconds": 1.0, "endSeconds": 2.0, "text": "this is a select statement"},
+        {"startSeconds": 2.0, "endSeconds": 3.0, "text": "now we add a where clause"},
+    ]
+    fake_meta = {
+        "model": "base",
+        "device": "cuda",
+        "computeType": "float16",
+        "detectedLanguage": "en",
+        "languageProbability": 0.99,
+        "audioDurationSeconds": 3.0,
+        "cueCount": 3,
+    }
+
+    def fake_transcribe(path, *, model_name, device, language):
+        assert path == str(video_path)
+        return fake_cues, fake_meta
+
+    monkeypatch.setattr(ovc, "_transcribe_audio_to_cues", fake_transcribe)
+
+    red = _make_jpeg((255, 0, 0))
+    green = _make_jpeg((0, 255, 0))
+    blue = _make_jpeg((0, 0, 255))
+    monkeypatch.setattr(
+        ovc.subprocess, "Popen", lambda *a, **kw: _FakeProc(red + green + blue)
+    )
+    monkeypatch.setattr(ovc, "_require_executable", lambda name: "/fake/ffmpeg")
+
+    playbook_root = tmp_path / "playbooks"
+    monkeypatch.setenv("SKILLMINT_PLAYBOOK_DIR", str(playbook_root))
+
+    result = ovc.capture_local_video_to_playbook(
+        str(video_path),
+        name="transcribe-test",
+        fps=1.0,
+        frame_width=64,
+        keyframe_diff_threshold=5.0,
+        min_step_seconds=0.5,
+        overwrite=True,
+    )
+    assert result["ok"] is True
+    assert result["whisper"] == fake_meta
+    transcript = (playbook_root / "transcribe-test" / "transcript.md").read_text()
+    assert "welcome to sql" in transcript or "select statement" in transcript
+
+
+def test_capture_local_video_transcribe_failure_is_soft(monkeypatch, tmp_path) -> None:
+    """A whisper failure must not abort capture; it records to captionErrors and continues."""
+    video_path = tmp_path / "noisy.mp4"
+    video_path.write_bytes(b"fake-mp4-bytes")
+
+    def fake_transcribe_raises(path, *, model_name, device, language):
+        raise live_video.LiveVideoError("model OOM")
+
+    monkeypatch.setattr(ovc, "_transcribe_audio_to_cues", fake_transcribe_raises)
+    monkeypatch.setattr(
+        ovc.subprocess, "Popen",
+        lambda *a, **kw: _FakeProc(_make_jpeg((10, 10, 10)) + _make_jpeg((250, 10, 10))),
+    )
+    monkeypatch.setattr(ovc, "_require_executable", lambda name: "/fake/ffmpeg")
+    monkeypatch.setenv("SKILLMINT_PLAYBOOK_DIR", str(tmp_path / "playbooks"))
+
+    result = ovc.capture_local_video_to_playbook(
+        str(video_path),
+        name="soft-fail-test",
+        fps=1.0,
+        frame_width=64,
+        keyframe_diff_threshold=5.0,
+        min_step_seconds=0.5,
+        overwrite=True,
+    )
+    assert result["ok"] is True
+    assert "transcribe failed" in result["captionErrors"]["en"]
+
+
+def test_resolve_whisper_device_explicit_passthrough() -> None:
+    """Explicit 'cuda' or 'cpu' passes through without probing; bad input errors."""
+    assert ovc._resolve_whisper_device("cpu") == ("cpu", "int8")
+    assert ovc._resolve_whisper_device("cuda") == ("cuda", "float16")
+    with pytest.raises(live_video.LiveVideoError, match="whisper_device"):
+        ovc._resolve_whisper_device("tpu")
 
 
 def test_capture_youtube_video_end_to_end_persists_playbook(monkeypatch, tmp_path) -> None:
@@ -203,3 +390,65 @@ def test_capture_youtube_video_end_to_end_persists_playbook(monkeypatch, tmp_pat
     assert (playbook_dir / "transcript.md").exists()
     keyframes = sorted((playbook_dir / "keyframes").iterdir())
     assert len(keyframes) == result["stepCount"]
+
+
+def test_capture_youtube_video_transcribes_when_captions_missing(monkeypatch, tmp_path) -> None:
+    """YouTube VOD capture should fall back to faster-whisper when caption tracks are absent."""
+    metadata = dict(SAMPLE_METADATA)
+    metadata["automatic_captions"] = {}
+    monkeypatch.setattr(ovc, "_run_ytdlp_metadata", lambda url: metadata)
+    monkeypatch.setattr(ovc, "_select_caption_tracks", lambda metadata, languages: {})
+
+    def fake_download(url, tmpdir, *, max_height, timeout_seconds):
+        path = os.path.join(tmpdir, "video.mp4")
+        with open(path, "wb") as fh:
+            fh.write(b"fake-mp4-bytes")
+        return path
+
+    fake_meta = {
+        "model": "base",
+        "device": "cpu",
+        "computeType": "int8",
+        "detectedLanguage": "en",
+        "languageProbability": 0.9,
+        "audioDurationSeconds": 2.0,
+        "cueCount": 2,
+    }
+
+    def fake_transcribe(path, *, model_name, device, language):
+        assert model_name == "base"
+        assert device == "auto"
+        assert language == "en"
+        return [
+            {"startSeconds": 0.0, "endSeconds": 0.5, "text": "fallback transcript"},
+            {"startSeconds": 1.0, "endSeconds": 1.5, "text": "source lesson"},
+        ], fake_meta
+
+    monkeypatch.setattr(ovc, "_download_with_ytdlp", fake_download)
+    monkeypatch.setattr(ovc, "_transcribe_audio_to_cues", fake_transcribe)
+    monkeypatch.setattr(
+        ovc.subprocess,
+        "Popen",
+        lambda *a, **kw: _FakeProc(
+            _make_jpeg((255, 0, 0)) + _make_jpeg((0, 255, 0))
+        ),
+    )
+    monkeypatch.setattr(ovc, "_require_executable", lambda name: "/fake/ffmpeg")
+    monkeypatch.setenv("SKILLMINT_PLAYBOOK_DIR", str(tmp_path))
+
+    result = ovc.capture_youtube_video_to_playbook(
+        "https://youtu.be/abc123",
+        name="youtube-transcribe-test",
+        fps=1.0,
+        frame_width=64,
+        keyframe_diff_threshold=5.0,
+        min_step_seconds=0.5,
+        overwrite=True,
+    )
+
+    assert result["ok"] is True
+    assert result["whisper"] == fake_meta
+    transcript = (tmp_path / "youtube-transcribe-test" / "transcript.md").read_text(
+        encoding="utf-8"
+    )
+    assert "fallback transcript" in transcript or "source lesson" in transcript

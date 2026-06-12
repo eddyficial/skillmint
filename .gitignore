@@ -6,6 +6,9 @@ venv/
 *.egg-info/
 build/
 dist/
-.claude/*
-!.claude/skills/
-!.claude/skills/**
+.agents/
+.codex/
+.claude/
+.skillmint/
+artifacts/
+_cap*.txt
