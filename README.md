@@ -143,13 +143,21 @@ or:
 .\.venv\Scripts\python.exe -m skillmint.web_ui --open
 ```
 
-Then:
+Then, in the **Create** panel:
 
 1. Paste a source URL or local file path.
-2. Select a rights basis.
-3. Pick the export target.
-4. Leave **Keep playbook** checked if you want the intermediate playbook retained.
-5. Click **Create skill**.
+2. Select a **rights basis** (required — the GUI won't submit without one).
+3. Set **Export intent** if you're not keeping this private/local — it feeds the same rights gate as `--export-intent` on the CLI and can block a public/commercial export outright.
+4. Leave **Source type** on `Auto` unless detection guesses wrong (e.g. a local video file misread as something else).
+5. Pick the **export target** (Claude, Codex, Cursor, Markdown, or Windsurf).
+6. Leave **Keep playbook**, **Overwrite existing asset** off, and **Same-origin crawl** at their defaults unless you know you need otherwise.
+7. Click **Create skill**.
+
+**Codifier choice matters here too.** Open **Source controls** and check **Finalize provider** before you click Create. It defaults to `Deterministic` — free, no AI call, but the output is often too generic to pass validation. Switch it to `Claude CLI` once you're past a first smoke test; see the note under [Use The CLI](#use-the-cli) for why.
+
+**Source controls** also holds everything else you won't need for a first run but will eventually: `Summary` / `Scope notes` / `Trigger phrase` / `Owner agent` to hand-tune the generated skill's framing, `Skills root` to target a different project, `Source owner` / `Source license` for the rights assessment, `Validation timeout`, doc-crawl options (`URL pattern`, `Max pages`, `Fetch timeout`), PDF page range, and video options (`Video FPS`, `Frame width`, `Captions path`, `Caption languages`, and whether to auto-transcribe when captions are missing).
+
+**After you click Create skill**, the job runs in the background — expect 30+ seconds, since the GUI's certified path always validates through a real `claude -p` call. The **Build output** panel on the right tracks it live through four stages (Capture → Distill → Compose → Export), then shows the result: paths to the generated `SKILL.md`, the playbook, lessons, and the export sidecar (each with a **Copy** button), plus the validation pass/fail summary. **Recent jobs** and **Playbooks** below it list everything you've created so far in this session.
 
 The GUI always creates a skill through the certified path:
 
