@@ -688,7 +688,86 @@ def _process_local_video(
             f"ffmpeg decode failed (exit {process.returncode}): "
             f"{stderr.decode('utf-8', errors='replace').strip() or 'no stderr'}"
         )
+    if steps:
+        _append_trailing_quiet_step(
+            steps,
+            caption_cues_by_lang=caption_cues_by_lang,
+            frame_count=frame_count,
+            fps=fps,
+            last_step_end_video_time=last_step_end_video_time,
+        )
     return steps
+
+
+def _append_trailing_quiet_step(
+    steps: list[dict[str, Any]],
+    *,
+    caption_cues_by_lang: dict[str, list[dict[str, Any]]],
+    frame_count: int,
+    fps: float,
+    last_step_end_video_time: float,
+) -> None:
+    """Flush any captions/transcript after the last detected keyframe as one final step.
+
+    The keyframe-diff loop only emits a step when the picture changes enough to
+    cross the threshold. If nothing visually changes for the remainder of the
+    recording — extremely common in a meeting recording once screen-share stops
+    updating while people keep talking — no step ever gets appended for that
+    trailing span, and the dialogue in it is silently dropped from every
+    downstream lesson and skill. This mirrors the live-capture path's existing
+    "quiet_period" step (see live_video.py's maybe_emit_quiet_step): reuse the
+    last known keyframe image and attach whatever caption/transcript text falls
+    after the last step's end, up to the end of the decoded video or the
+    transcript, whichever is later.
+    """
+    frame_based_end = (frame_count / fps) if fps > 0 else last_step_end_video_time
+    caption_based_end = _max_caption_end_seconds(caption_cues_by_lang)
+    trailing_end = max(frame_based_end, caption_based_end, last_step_end_video_time)
+    if trailing_end <= last_step_end_video_time:
+        return
+    trailing_caption_text = _captions_in_window(
+        caption_cues_by_lang, last_step_end_video_time, trailing_end + 0.001
+    )
+    if not trailing_caption_text:
+        return
+    last_step = steps[-1]
+    last_jpeg = last_step.get("keyframeJpeg")
+    visual_action = analyze_visual_action(
+        last_jpeg,
+        last_jpeg,
+        diff_score=0.0,
+        video_time_seconds=trailing_end,
+        ocr_enabled=False,
+    )
+    steps.append(
+        {
+            "sequence": len(steps) + 1,
+            "startedAt": last_step_end_video_time,
+            "endedAt": trailing_end,
+            "videoStartSeconds": last_step_end_video_time,
+            "videoEndSeconds": trailing_end,
+            "trigger": "quiet_period",
+            "diffScore": 0.0,
+            "secondsSincePrevious": trailing_end - last_step_end_video_time,
+            "keyframeJpeg": last_jpeg,
+            "keyframeWidth": last_step.get("keyframeWidth"),
+            "keyframeHeight": last_step.get("keyframeHeight"),
+            "transcriptText": "",
+            "captionText": trailing_caption_text,
+            "visualAction": visual_action,
+        }
+    )
+
+
+def _max_caption_end_seconds(caption_cues_by_lang: dict[str, list[dict[str, Any]]]) -> float:
+    """Return the latest endSeconds across all caption/transcript cues, or 0.0 if none."""
+    latest = 0.0
+    for cues in caption_cues_by_lang.values():
+        for cue in cues:
+            end = cue.get("endSeconds")
+            if isinstance(end, (int, float)) and end > latest:
+                latest = float(end)
+    return latest
 
 
 def _captions_in_window(
@@ -696,7 +775,7 @@ def _captions_in_window(
     start_seconds: float,
     end_seconds: float,
 ) -> str:
-    """Collect caption text whose startSeconds falls within [start, end] across languages."""
+    """Collect caption text whose startSeconds falls within [start, end) across languages."""
     chunks: list[str] = []
     for cues in caption_cues_by_lang.values():
         for cue in cues:

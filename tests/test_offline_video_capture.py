@@ -143,6 +143,80 @@ def test_process_local_video_respects_min_step_seconds(monkeypatch, tmp_path) ->
     assert len(steps) == 1
 
 
+def test_process_local_video_flushes_trailing_captions_after_last_keyframe(
+    monkeypatch, tmp_path
+) -> None:
+    """Regression: dialogue after the last visual scene-change must not be dropped.
+
+    The keyframe loop only appends a step when the picture changes enough to
+    cross the diff threshold. If the picture goes static for the remainder of
+    the recording (e.g. a screen-share stops updating while people keep
+    talking, very common in a meeting recording) there is no further keyframe
+    to anchor a step to, so any captions/transcript after the last keyframe
+    used to be silently dropped from the playbook and every downstream lesson.
+    """
+    red = _make_jpeg((255, 0, 0))
+    green = _make_jpeg((0, 255, 0))
+    blue = _make_jpeg((0, 0, 255))
+    # Frames at 0s,1s,2s,3s,4s: red/green/blue each trigger a keyframe (t=0,1,2),
+    # then two more blue frames (t=3,4) that do NOT trigger a new keyframe.
+    payload = red + green + blue + blue + blue
+    monkeypatch.setattr(ovc.subprocess, "Popen", lambda *a, **kw: _FakeProc(payload))
+    monkeypatch.setattr(ovc, "_require_executable", lambda name: "/fake/ffmpeg")
+
+    cues = {
+        "en": [
+            {"startSeconds": 0.5, "endSeconds": 1.0, "text": "early remark"},
+            # Falls after the last keyframe's step end (t=2.0) — this is the
+            # part that used to vanish with no trailing step to hold it.
+            {"startSeconds": 3.2, "endSeconds": 3.8, "text": "closing decision"},
+        ]
+    }
+    steps = ovc._process_local_video(
+        str(tmp_path / "fake.mp4"),
+        fps=1.0,
+        frame_width=64,
+        keyframe_diff_threshold=5.0,
+        min_step_seconds=0.5,
+        caption_cues_by_lang=cues,
+        timeout_seconds=30.0,
+    )
+
+    # 3 real keyframe steps (red, green, blue) plus one trailing quiet-period flush.
+    assert len(steps) == 4
+    trailing = steps[-1]
+    assert trailing["trigger"] == "quiet_period"
+    assert trailing["videoStartSeconds"] == 2.0
+    assert trailing["videoEndSeconds"] >= 3.8
+    assert "closing decision" in trailing["captionText"]
+    # No caption text is dropped anywhere: every cue must show up in exactly one step.
+    all_caption_text = " ".join(s["captionText"] for s in steps)
+    assert "early remark" in all_caption_text
+    assert "closing decision" in all_caption_text
+
+
+def test_process_local_video_skips_empty_trailing_flush(monkeypatch, tmp_path) -> None:
+    """No trailing step should be added when there's nothing left to say — no step spam."""
+    red = _make_jpeg((255, 0, 0))
+    green = _make_jpeg((0, 255, 0))
+    payload = red + green + green  # green repeats with no further scene change
+    monkeypatch.setattr(ovc.subprocess, "Popen", lambda *a, **kw: _FakeProc(payload))
+    monkeypatch.setattr(ovc, "_require_executable", lambda name: "/fake/ffmpeg")
+
+    steps = ovc._process_local_video(
+        str(tmp_path / "fake.mp4"),
+        fps=1.0,
+        frame_width=64,
+        keyframe_diff_threshold=5.0,
+        min_step_seconds=0.5,
+        caption_cues_by_lang={},  # nothing was ever said
+        timeout_seconds=30.0,
+    )
+
+    assert len(steps) == 2
+    assert all(s["trigger"] != "quiet_period" for s in steps)
+
+
 def test_capture_youtube_video_rejects_live_streams(monkeypatch) -> None:
     """The offline path must reject live streams and steer callers to start_youtube_watch."""
     live_meta = dict(SAMPLE_METADATA)
