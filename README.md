@@ -378,10 +378,10 @@ Run tests:
 Current local result:
 
 ```text
-209 passed, 1 skipped
+211 passed, 1 skipped
 ```
 
-When adding a public function argument, update every matching MCP wrapper in `skillmint/server.py`. MCP clients only see what the wrapper exposes.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for dev setup, PR expectations, and the MCP-wrapper-sync rule before making changes.
 
 ## License
 
