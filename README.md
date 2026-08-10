@@ -104,6 +104,11 @@ On Windows, one common `ffmpeg` install path is:
 winget install Gyan.FFmpeg
 ```
 
+`winget` updates your PATH permanently, but the terminal you ran it from will
+not see the new PATH until you close and reopen it. Open a **fresh** terminal
+before running `ffmpeg -version` to confirm the install — running it in the
+same window will still report "not found."
+
 Required for GUI-certified creation and certified CLI commands:
 
 - Claude Code CLI on `PATH`, because validation uses `claude -p`
@@ -159,6 +164,8 @@ The GUI currently creates `Skill` assets only. Agent and workflow scaffolds stil
 ## Use The CLI
 
 The examples below use placeholders such as `<source-url>`. Replace them with source material you own, have licensed, or can otherwise use.
+
+**Codifier choice matters.** Every example below uses `--codify-provider deterministic` (the default) unless it explicitly sets `--codify-provider claude_cli`. Deterministic codification just restates the distilled source in list form — free, no AI call, good for a first smoke test — but the result is often too generic to pass `--validate`. `claude_cli` codification spends one real Claude Code call synthesizing an actual grounded procedure and is what produces a skill worth keeping. Once a source captures cleanly, add `--codify-provider claude_cli` to the command before you rely on the output.
 
 For a local smoke source, start a tiny web server from the repo:
 
