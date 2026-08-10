@@ -142,11 +142,21 @@ def assess_rights(
 
 
 def assert_export_allowed(assessment: dict[str, Any]) -> None:
-    """Raise when the requested export intent is not permitted."""
-    if assessment.get("exportAllowed") is True:
-        return
+    """Raise when the requested export intent is not permitted.
+
+    ``exportAllowed`` is ``True`` (fully allowed), ``False`` (blocked), or the
+    string ``"private_only"`` (capped to private/internal use because of
+    elevated risk). A "private_only" cap is not a block when the caller
+    already requested private or internal export — that's exactly what the
+    cap allows. It only blocks a request for something broader (public or
+    commercial) than the risk assessment permits.
+    """
     intent = assessment.get("exportIntent")
     allowed = assessment.get("exportAllowed")
+    if allowed is True:
+        return
+    if allowed == "private_only" and intent in {"private", "internal"}:
+        return
     basis = assessment.get("rightsBasis")
     reasons = "; ".join(assessment.get("riskReasons") or [])
     raise RightsPolicyError(
