@@ -29,3 +29,11 @@ jobs:
 
       - name: Run tests
         run: pytest -q
+
+  docs-links:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check local links in Markdown docs
+        run: python3 scripts/check_doc_links.py
