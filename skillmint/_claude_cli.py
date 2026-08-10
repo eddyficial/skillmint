@@ -52,13 +52,16 @@ def run(
     timeout_seconds: float = 300.0,
     extra_args: list[str] | None = None,
 ) -> ClaudeCliResult:
-    """Invoke `claude -p <prompt>` once and return the captured result.
+    """Invoke `claude -p` once with ``prompt`` on stdin and return the result.
 
     ``cwd`` becomes the spawned process's working directory (and is what the
     Claude session sees for Bash/Edit/Read paths). ``extra_args`` is forwarded
-    verbatim before the prompt for future flag expansion. The prompt is passed
-    on the command line, not on stdin, because Claude Code's `-p` shape expects
-    it as an arg.
+    verbatim before the prompt flag for future flag expansion. The prompt is
+    passed on stdin, not as a command-line argument — Windows caps a process's
+    total command-line length (~8K-32K chars depending on shell/quoting), and
+    prompts embedding full source lessons routinely exceed that, failing with
+    "The command line is too long." `claude -p` reads the prompt from stdin
+    when no positional prompt argument is given.
 
     Raises ClaudeCliError on missing CLI, timeout, or process spawn failure.
     A non-zero exit code does NOT raise — callers inspect ``exit_code`` so they
@@ -69,16 +72,18 @@ def run(
     args: list[str] = [exe, "-p"]
     if extra_args:
         args.extend(extra_args)
-    args.append(prompt)
 
     resolved_cwd = cwd if cwd is not None else os.getcwd()
     started = time.monotonic()
     try:
         completed = subprocess.run(  # noqa: S603 — explicit exe path, no shell
             args,
+            input=prompt,
             cwd=resolved_cwd,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=timeout_seconds,
             check=False,
         )
