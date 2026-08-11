@@ -1,12 +1,19 @@
 const form = document.querySelector("#createForm");
 const formState = document.querySelector("#formState");
 const jobState = document.querySelector("#jobState");
+const jobTimer = document.querySelector("#jobTimer");
 const artifactList = document.querySelector("#artifactList");
 const jobsList = document.querySelector("#jobsList");
 const playbooksList = document.querySelector("#playbooksList");
 const pipeline = document.querySelector("#pipeline");
+const pipelineNote = document.querySelector("#pipelineNote");
 const systemStrip = document.querySelector("#systemStrip");
 const targetOptions = document.querySelector("#targetOptions");
+const stepper = document.querySelector("#stepper");
+const rightsBasisSelect = document.querySelector("#rightsBasis");
+const rightsBasisNote = document.querySelector("#rightsBasisNote");
+const exportIntentSelect = document.querySelector("#exportIntent");
+const exportIntentNote = document.querySelector("#exportIntentNote");
 
 const targetLabels = {
   claude_code: "Claude",
@@ -16,13 +23,33 @@ const targetLabels = {
   markdown: "Markdown",
 };
 
+const rightsBasisNotes = {
+  owned: "Low risk. Commercial and public export are generally allowed.",
+  licensed: "Low risk, as long as your license actually covers this use.",
+  internal: "Low risk for private/internal use. Not for public or commercial export.",
+  user_attested_permission: "You're vouching for permission yourself — keep this to private or internal use.",
+  creative_commons: "Check the exact license variant; \"-NC\" excludes commercial use.",
+  public_domain: "Low risk. Commercial and public export are generally allowed.",
+  fair_use: "Reviewed, not guaranteed — public/commercial export is likely to be blocked.",
+};
+
+const exportIntentNotes = {
+  private: "Safest default. Only you (or this machine) will use the result.",
+  internal: "Shared within your team/org. Same low-risk bases as private.",
+  public: "Can be blocked unless the rights basis clearly supports redistribution.",
+  commercial: "Can be blocked unless the rights basis clearly supports commercial use.",
+};
+
 const state = {
   activeJobId: null,
   pollTimer: null,
+  timerInterval: null,
+  runStartedAt: null,
   formBusy: false,
   systemReady: true,
   systemBlockReason: "",
   targets: ["claude_code", "codex", "cursor", "windsurf", "markdown"],
+  currentStep: 1,
 };
 
 function escapeHtml(value) {
@@ -62,7 +89,7 @@ function setFormBusy(isBusy) {
 }
 
 function updateSubmitAvailability() {
-  const submit = form.querySelector('button[type="submit"]');
+  const submit = document.querySelector("#submitButton");
   if (!submit) return;
   submit.disabled = state.formBusy || !state.systemReady;
   if (!state.systemReady) {
@@ -71,6 +98,75 @@ function updateSubmitAvailability() {
     submit.removeAttribute("title");
   }
 }
+
+// ---------------------------------------------------------------------------
+// Step navigation
+// ---------------------------------------------------------------------------
+
+function goToStep(target) {
+  const stepNumber = Number(target);
+  if (!stepNumber) return;
+  for (const fieldset of form.querySelectorAll(".step")) {
+    const isActive = Number(fieldset.dataset.step) === stepNumber;
+    fieldset.hidden = !isActive;
+    fieldset.classList.toggle("is-active", isActive);
+  }
+  for (const li of stepper.querySelectorAll("li")) {
+    const num = Number(li.dataset.step);
+    li.classList.toggle("is-active", num === stepNumber);
+    li.classList.toggle("is-done", num < stepNumber);
+  }
+  state.currentStep = stepNumber;
+  if (stepNumber === 1) {
+    document.querySelector("#source")?.focus();
+  }
+}
+
+function validateStep(stepNumber) {
+  if (stepNumber === 1) {
+    const source = fieldValue("source");
+    if (!source) {
+      document.querySelector("#source")?.reportValidity();
+      return false;
+    }
+    return true;
+  }
+  if (stepNumber === 2) {
+    if (!fieldValue("rightsBasis")) {
+      rightsBasisSelect?.reportValidity();
+      return false;
+    }
+    return true;
+  }
+  return true;
+}
+
+form.addEventListener("click", (event) => {
+  const nextButton = event.target.closest("[data-next]");
+  if (nextButton) {
+    if (validateStep(state.currentStep)) {
+      goToStep(nextButton.dataset.next);
+    }
+    return;
+  }
+  const backButton = event.target.closest("[data-back]");
+  if (backButton) {
+    goToStep(backButton.dataset.back);
+  }
+});
+
+rightsBasisSelect?.addEventListener("change", () => {
+  const note = rightsBasisNotes[rightsBasisSelect.value];
+  rightsBasisNote.textContent = note || "Required — this feeds the rights and provenance gate.";
+});
+
+exportIntentSelect?.addEventListener("change", () => {
+  exportIntentNote.textContent = exportIntentNotes[exportIntentSelect.value] || "";
+});
+
+// ---------------------------------------------------------------------------
+// System status + targets
+// ---------------------------------------------------------------------------
 
 function renderTargets(targets) {
   state.targets = Array.isArray(targets) && targets.length ? targets : state.targets;
@@ -112,6 +208,10 @@ async function loadStatus() {
   updateSubmitAvailability();
 }
 
+// ---------------------------------------------------------------------------
+// Payload
+// ---------------------------------------------------------------------------
+
 function fieldValue(name) {
   const el = form.elements[name];
   return el ? String(el.value || "").trim() : "";
@@ -133,7 +233,7 @@ function collectPayload() {
     source: fieldValue("source"),
     skillName: fieldValue("skillName"),
     sourceType: fieldValue("sourceType") || "auto",
-    shape: fieldValue("shape") || "skill",
+    shape: "skill",
     target: selectedTarget(),
     overwrite: Boolean(form.elements.overwrite.checked),
     codify: true,
@@ -159,20 +259,10 @@ function collectPayload() {
     "codifyProvider",
     "urlPattern",
     "captionsPath",
-    "captionLanguage",
-    "whisperModel",
-    "whisperDevice",
     "maxPages",
     "frameWidth",
-    "maxHeight",
     "fps",
-    "keyframeDiffThreshold",
-    "minStepSeconds",
-    "downloadTimeoutSeconds",
-    "processTimeoutSeconds",
     "timeoutSeconds",
-    "sectionDiffScore",
-    "codifyTimeoutSeconds",
     "validationTimeoutSeconds",
     "pageStart",
     "pageEnd",
@@ -190,8 +280,15 @@ function collectPayload() {
   return payload;
 }
 
+// ---------------------------------------------------------------------------
+// Submit + polling
+// ---------------------------------------------------------------------------
+
 async function submitCreate(event) {
   event.preventDefault();
+  if (!validateStep(1) || !validateStep(2)) {
+    return;
+  }
   if (!state.systemReady) {
     setPill(formState, "Blocked", "is-bad");
     renderError(state.systemBlockReason || "Required system dependency is unavailable.");
@@ -206,6 +303,7 @@ async function submitCreate(event) {
       body: JSON.stringify(payload),
     });
     state.activeJobId = result.job.id;
+    startTimer();
     renderJob(result.job);
     pollActiveJob();
   } catch (error) {
@@ -216,11 +314,25 @@ async function submitCreate(event) {
   }
 }
 
-function pipelineClass(status) {
-  if (status === "running" || status === "queued") return "pipeline is-running";
-  if (status === "succeeded") return "pipeline is-succeeded";
-  if (status === "failed") return "pipeline is-failed";
-  return "pipeline";
+function startTimer() {
+  stopTimer();
+  state.runStartedAt = Date.now();
+  jobTimer.hidden = false;
+  tickTimer();
+  state.timerInterval = setInterval(tickTimer, 1000);
+}
+
+function stopTimer() {
+  if (state.timerInterval) {
+    clearInterval(state.timerInterval);
+    state.timerInterval = null;
+  }
+}
+
+function tickTimer() {
+  if (!state.runStartedAt) return;
+  const seconds = Math.round((Date.now() - state.runStartedAt) / 1000);
+  jobTimer.textContent = `${seconds}s elapsed`;
 }
 
 function statusClass(status) {
@@ -230,13 +342,102 @@ function statusClass(status) {
   return "is-idle";
 }
 
+const STAGE_HINTS = [
+  { stage: "capture", patterns: ["ffmpeg", "yt-dlp", "download", "decode", "capture", "playbook"] },
+  { stage: "distill", patterns: ["distill", "lesson"] },
+  { stage: "compose", patterns: ["codify", "scaffold", "compose", "claude -p", "claude cli"] },
+  { stage: "export", patterns: ["certification", "validation", "rights gate", "export", "prompt injection", "prompt-injection"] },
+];
+
+function guessFailedStage(message) {
+  const lower = String(message || "").toLowerCase();
+  for (const { stage, patterns } of STAGE_HINTS) {
+    if (patterns.some((p) => lower.includes(p))) {
+      return stage;
+    }
+  }
+  return "export";
+}
+
+function renderPipeline(status, errorMessage) {
+  const spans = [...pipeline.querySelectorAll("span")];
+  for (const span of spans) {
+    span.classList.remove("is-failed-step");
+  }
+  if (status === "running" || status === "queued") {
+    pipeline.className = "pipeline is-working";
+    pipelineNote.textContent = "Working through capture → distill → compose → export. Typically 5–90s depending on whether validation runs.";
+    return;
+  }
+  if (status === "succeeded") {
+    pipeline.className = "pipeline is-succeeded";
+    pipelineNote.textContent = "All stages completed.";
+    return;
+  }
+  if (status === "failed") {
+    pipeline.className = "pipeline is-failed";
+    const failedStage = guessFailedStage(errorMessage);
+    const failedSpan = pipeline.querySelector(`[data-step="${failedStage}"]`);
+    failedSpan?.classList.add("is-failed-step");
+    pipelineNote.textContent = "Stopped before completing — see the error below.";
+    return;
+  }
+  pipeline.className = "pipeline";
+  pipelineNote.textContent = "";
+}
+
+const ERROR_TRANSLATIONS = [
+  {
+    match: /rights gate blocked/i,
+    title: "Blocked by the rights gate",
+    body: "The requested export intent goes further than your rights basis supports. Try a more conservative export intent (private/internal), or pick a stronger rights basis if you actually have one.",
+  },
+  {
+    match: /certification rejected/i,
+    title: "Certification didn't pass",
+    body: "The pipeline ran to completion and a skill file was written, but execution validation didn't fully pass — open the generated SKILL.md yourself before relying on it. This can vary between identical runs since validation is graded by a live model call.",
+  },
+  {
+    match: /claude cli.*not found|claude.*not available|claude CLI is required/i,
+    title: "Claude Code CLI not found",
+    body: "Install the Claude Code CLI and make sure `claude` is on PATH, then restart this page.",
+  },
+  {
+    match: /ffmpeg/i,
+    title: "ffmpeg problem",
+    body: "Confirm ffmpeg is installed and on PATH (winget install Gyan.FFmpeg on Windows). If you just installed it, open a fresh terminal — the current one won't see the updated PATH.",
+  },
+  {
+    match: /prompt.?injection/i,
+    title: "Blocked by the prompt-injection guard",
+    body: "The captured source contains text that looks like it's trying to direct the assistant rather than describe content. Review the source manually or try a different one.",
+  },
+];
+
+function friendlyError(message) {
+  const text = String(message || "Skillmint failed");
+  for (const entry of ERROR_TRANSLATIONS) {
+    if (entry.match.test(text)) {
+      return { title: entry.title, body: entry.body, raw: text };
+    }
+  }
+  return { title: "Something went wrong", body: text, raw: "" };
+}
+
 function renderError(message, trace = "") {
-  artifactList.className = "artifact-list error-box";
+  const { title, body, raw } = friendlyError(message);
+  const showRaw = raw && raw !== body;
+  artifactList.className = "artifact-list";
   artifactList.innerHTML = `
-    <div>
-      <strong>Error</strong>
-      <p>${escapeHtml(message)}</p>
-      ${trace ? `<pre>${escapeHtml(trace)}</pre>` : ""}
+    <div class="error-card">
+      <div class="error-title"><span class="error-badge">!</span>${escapeHtml(title)}</div>
+      <p>${escapeHtml(body)}</p>
+      ${showRaw || trace ? `
+        <details>
+          <summary>Technical details</summary>
+          <pre>${escapeHtml([showRaw ? raw : "", trace].filter(Boolean).join("\n\n"))}</pre>
+        </details>
+      ` : ""}
     </div>
   `;
 }
@@ -285,7 +486,11 @@ function renderJob(job) {
   const status = job.status || "idle";
   setPill(jobState, status[0].toUpperCase() + status.slice(1), statusClass(status));
   setPill(formState, status === "failed" ? "Failed" : status === "succeeded" ? "Ready" : "Running", statusClass(status));
-  pipeline.className = pipelineClass(status);
+  renderPipeline(status, job.error);
+
+  if (status !== "running" && status !== "queued") {
+    stopTimer();
+  }
 
   if (status === "failed") {
     renderError(job.error || "Skillmint failed", job.traceback || "");
@@ -374,6 +579,7 @@ async function selectJob(jobId) {
     const job = await fetchJson(`/api/jobs/${jobId}`);
     renderJob(job);
     if (job.status === "queued" || job.status === "running") {
+      if (!state.runStartedAt) startTimer();
       pollActiveJob();
     }
   } catch (error) {
@@ -401,12 +607,17 @@ document.addEventListener("click", async (event) => {
 form.addEventListener("submit", submitCreate);
 form.addEventListener("reset", () => {
   clearTimeout(state.pollTimer);
+  stopTimer();
+  jobTimer.hidden = true;
   state.activeJobId = null;
+  state.runStartedAt = null;
   setPill(formState, "Ready", "is-idle");
   setPill(jobState, "No job", "is-idle");
   pipeline.className = "pipeline";
+  pipelineNote.textContent = "";
   artifactList.className = "artifact-list empty";
   artifactList.innerHTML = "<p>No run selected.</p>";
+  goToStep(1);
 });
 
 document.querySelector("#refreshJobs").addEventListener("click", loadJobs);
