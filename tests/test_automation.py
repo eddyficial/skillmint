@@ -152,6 +152,50 @@ def test_run_threads_rights_flags(capsys) -> None:
     assert json.loads(capsys.readouterr().out)["ok"] is True
 
 
+def test_run_returns_nonzero_exit_code_when_result_ok_is_false(capsys) -> None:
+    """A rejected certification gate (ok=False, no exception) must fail the process.
+
+    create_fn doesn't raise when --require-certification rejects a skill — it
+    returns a normal dict with ok=False. Without checking result["ok"], a
+    caller relying on the shell exit code (rather than parsing the JSON body)
+    would see "success" for a certification the tool itself just rejected.
+    """
+    def fake_create(source: str, **kwargs):
+        return {
+            "ok": False,
+            "skillName": "demo",
+            "certificationStatus": "rejected",
+            "certified": False,
+        }
+
+    code = automation.run(
+        [
+            "https://example.com/tutorial",
+            "--validate",
+            "--require-certification",
+        ],
+        create_fn=fake_create,
+    )
+
+    assert code == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ok"] is False
+    assert payload["certificationStatus"] == "rejected"
+
+
+def test_run_returns_zero_exit_code_when_result_ok_is_true(capsys) -> None:
+    """Sanity check the inverse: a passing gate must still exit 0."""
+    def fake_create(source: str, **kwargs):
+        return {"ok": True, "skillName": "demo", "certificationStatus": "certified"}
+
+    code = automation.run(
+        ["https://example.com/tutorial", "--validate", "--require-certification"],
+        create_fn=fake_create,
+    )
+
+    assert code == 0
+
+
 def test_page_range_parser_accepts_dash_or_colon() -> None:
     assert automation._page_range("2-6") == (2, 6)
     assert automation._page_range("2:6") == (2, 6)

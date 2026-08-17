@@ -138,7 +138,11 @@ def run(
         return 1
 
     print(json.dumps(result, indent=2))
-    return 0
+    # A gate can fail (e.g. --require-certification rejects the skill) without
+    # raising — create_fn returns ok=False instead of throwing. The process
+    # exit code must reflect that, or a caller checking $? instead of parsing
+    # the JSON body sees "success" for a rejected/failed result.
+    return 0 if result.get("ok") else 1
 
 
 def _page_range(raw: str) -> tuple[int, int]:
