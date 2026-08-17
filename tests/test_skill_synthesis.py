@@ -251,7 +251,7 @@ def test_video_trigger_description_names_triggers_and_input_type(tmp_path, monke
     assert "tutorial" in desc.lower()
     assert "a tutorial video URL" in desc
     assert "auto-generated from youtube_video source" in desc
-    assert "Use when the user says" in desc
+    assert "whenever the user asks" in desc
     assert desc.count("'") >= 6  # at least three single-quoted trigger phrases
 
 
@@ -567,7 +567,7 @@ def test_docs_topic_falls_back_to_seed_url_when_title_is_generic(tmp_path, monke
     )
     desc = result["triggerDescription"]
     # Topic should be "uv" (from seed-URL path segment), not "Getting started".
-    assert "about uv." in desc
+    assert "about uv," in desc
     assert "'how do I use uv'" in desc
     assert "Getting started" not in desc.split("Covers")[0]
 
@@ -591,7 +591,7 @@ def test_docs_topic_keeps_specific_title_over_seed_url(tmp_path, monkeypatch) ->
     result = ss.compose_skill_scaffold_from_playbook(
         "specific-title", skill_name="webhook-skill", skills_root=str(tmp_path / "project")
     )
-    assert "about Webhook signatures." in result["triggerDescription"]
+    assert "about Webhook signatures," in result["triggerDescription"]
 
 
 def test_identical_token_bigrams_are_dropped_from_keywords(tmp_path, monkeypatch) -> None:
@@ -618,7 +618,7 @@ def test_identical_token_bigrams_are_dropped_from_keywords(tmp_path, monkeypatch
     desc = result["triggerDescription"]
     assert "semantics semantics" not in desc.lower()
     # Sanity: actually pulled real bigrams.
-    assert "Covers " in desc and "Covers concepts from the source" not in desc
+    assert "covering " in desc and "covering the concepts covered in the source" not in desc
 
 
 def test_knows_preamble_is_source_kind_aware(tmp_path, monkeypatch) -> None:
@@ -943,8 +943,12 @@ def test_agent_description_uses_cleaned_topic_not_verbose_title(tmp_path, monkey
 # ---------------------------------------------------------------------------
 
 
-def test_skill_scaffold_has_typed_io_frontmatter_keys(tmp_path, monkeypatch) -> None:
-    """YAML frontmatter declares inputs / outputs / dependencies as null placeholders."""
+def test_skill_scaffold_frontmatter_is_name_and_description_only(tmp_path, monkeypatch) -> None:
+    """YAML frontmatter has only name/description (the official Agent Skills spec fields).
+
+    Typed inputs/outputs/dependencies are declared in the body sections
+    instead — see test_skill_scaffold_has_inputs_outputs_success_failure_dependencies_sections.
+    """
     monkeypatch.setenv("SKILLMINT_PLAYBOOK_DIR", str(tmp_path))
     _write_playbook(tmp_path, name="govern-skill")
     result = ss.compose_skill_scaffold_from_playbook(
@@ -955,9 +959,11 @@ def test_skill_scaffold_has_typed_io_frontmatter_keys(tmp_path, monkeypatch) -> 
     parts = body.split("---", 2)
     assert len(parts) >= 3, "scaffold must have YAML frontmatter"
     frontmatter = parts[1]
-    assert "inputs: null" in frontmatter
-    assert "outputs: null" in frontmatter
-    assert "dependencies: null" in frontmatter
+    assert "name:" in frontmatter
+    assert "description:" in frontmatter
+    assert "inputs" not in frontmatter
+    assert "outputs" not in frontmatter
+    assert "dependencies" not in frontmatter
 
 
 def test_skill_scaffold_has_inputs_outputs_success_failure_dependencies_sections(tmp_path, monkeypatch) -> None:
@@ -1012,8 +1018,12 @@ def test_skill_critical_rule_lists_all_stub_sections(tmp_path, monkeypatch) -> N
 # ---------------------------------------------------------------------------
 
 
-def test_agent_scaffold_has_typed_io_frontmatter_keys(tmp_path, monkeypatch) -> None:
-    """Agent YAML frontmatter declares inputs / outputs / owned_skills as null placeholders."""
+def test_agent_scaffold_frontmatter_is_name_and_description_only(tmp_path, monkeypatch) -> None:
+    """Agent YAML frontmatter has only name/description, not inputs/outputs/owned_skills.
+
+    Those are declared in the body sections instead — see
+    test_agent_scaffold_has_constraints_and_error_handling_sections.
+    """
     monkeypatch.setenv("SKILLMINT_PLAYBOOK_DIR", str(tmp_path))
     _write_curriculum_playbook(
         tmp_path,
@@ -1027,9 +1037,11 @@ def test_agent_scaffold_has_typed_io_frontmatter_keys(tmp_path, monkeypatch) -> 
     body = Path(result["agentPath"]).read_text(encoding="utf-8")
     parts = body.split("---", 2)
     frontmatter = parts[1]
-    assert "inputs: null" in frontmatter
-    assert "outputs: null" in frontmatter
-    assert "owned_skills: null" in frontmatter
+    assert "name:" in frontmatter
+    assert "description:" in frontmatter
+    assert "inputs" not in frontmatter
+    assert "outputs" not in frontmatter
+    assert "owned_skills" not in frontmatter
 
 
 def test_agent_scaffold_has_constraints_and_error_handling_sections(tmp_path, monkeypatch) -> None:

@@ -427,6 +427,35 @@ def _keywords(sections: list[dict[str, Any]], source_kind: str, *, max_kw: int =
     return result
 
 
+def _natural_join(items: list[str]) -> str:
+    """Join items as flowing prose ("a", "a and b", "a, b, and c") instead of a raw list.
+
+    skill-creator's rules ask for descriptions written as natural sentences,
+    not comma-dumped keyword fragments — this is what turns "Covers x, y, z"
+    into "covering x, y, and z".
+    """
+    cleaned = [i for i in items if i]
+    if not cleaned:
+        return ""
+    if len(cleaned) == 1:
+        return cleaned[0]
+    if len(cleaned) == 2:
+        return f"{cleaned[0]} and {cleaned[1]}"
+    return ", ".join(cleaned[:-1]) + f", and {cleaned[-1]}"
+
+
+def _natural_join_quoted(items: list[str]) -> str:
+    """Like _natural_join, but wraps each item in quotes and uses 'or' before the last."""
+    cleaned = [f"'{i}'" for i in items if i]
+    if not cleaned:
+        return ""
+    if len(cleaned) == 1:
+        return cleaned[0]
+    if len(cleaned) == 2:
+        return f"{cleaned[0]} or {cleaned[1]}"
+    return ", ".join(cleaned[:-1]) + f", or {cleaned[-1]}"
+
+
 def _input_phrase(source_kind: str) -> str:
     """Human-readable description of what a user typically hands you for this source kind."""
     return {
@@ -485,12 +514,13 @@ def _generate_trigger_description(
         if url_topic:
             topic = url_topic
     keywords = _keywords(sections, source_kind)
-    kw_str = ", ".join(keywords) if keywords else "concepts from the source"
+    kw_str = _natural_join(keywords) if keywords else "the concepts covered in the source"
     triggers = _trigger_phrases(topic, source_kind)
-    trigger_str = ", ".join(f"'{t}'" for t in triggers)
+    trigger_str = _natural_join_quoted(triggers)
     return (
-        f"{_procedure_lead(topic, source_kind)}. Covers {kw_str}. "
-        f"Use when the user says {trigger_str}, or hands you {_input_phrase(source_kind)}. "
+        f"{_procedure_lead(topic, source_kind)}, covering {kw_str}. "
+        f"Make sure to use this skill whenever the user asks {trigger_str}, or hands you "
+        f"{_input_phrase(source_kind)} on this topic, even if they don't name the topic exactly. "
         f"(auto-generated from {source_kind} source; refine via /codify for best matching)"
     )
 
@@ -510,17 +540,18 @@ def _generate_agent_description(
     title = (manifest.get("video") or {}).get("title") or manifest.get("name") or ""
     topic = _topic_from_title(title)
     keywords = _keywords(sections, source_kind)
-    kw_str = ", ".join(keywords) if keywords else "concepts from the source curriculum"
+    kw_str = _natural_join(keywords) if keywords else "the source curriculum"
     triggers = [
         f"become a {topic}",
         f"learn {topic} end-to-end",
         f"build a {topic} portfolio",
         f"what does a {topic} do",
     ]
-    trigger_str = ", ".join(f"'{t}'" for t in triggers[:3])
+    trigger_str = _natural_join_quoted(triggers[:3])
     return (
-        f"Orchestrating agent for end-to-end {topic} work. Covers {kw_str}. "
-        f"Use when the user says {trigger_str}, or hands you a multi-skill {topic} task. "
+        f"Orchestrating agent for end-to-end {topic} work, covering {kw_str}. "
+        f"Make sure to use this agent whenever the user asks {trigger_str}, or hands you a "
+        f"multi-skill {topic} task, even if they don't ask for an 'agent' by name. "
         f"Delegates to the skills listed in `## Owned skills` (filled in by /codify). "
         f"(auto-generated from {source_kind} source; refine via /codify for best matching)"
     )
@@ -538,13 +569,13 @@ def _generate_workflow_description(
     title = (manifest.get("video") or {}).get("title") or manifest.get("name") or ""
     topic = _topic_from_title(title)
     keywords = _keywords(sections, source_kind)
-    kw_str = ", ".join(keywords) if keywords else "the source curriculum"
+    kw_str = _natural_join(keywords) if keywords else "the source curriculum"
     return (
-        f"Orchestration workflow for {topic}. Sequences skills with decision "
-        f"gates, data flow, and rollback. Covers {kw_str}. Use when the user "
-        f"says 'run the {topic} workflow', 'walk through {topic} end-to-end', "
-        f"or hands you a multi-step {topic} task that needs deterministic "
-        f"ordering. (auto-generated from {source_kind} source; refine via "
+        f"Orchestration workflow for {topic} that sequences skills with decision "
+        f"gates, data flow, and rollback, covering {kw_str}. Make sure to use this "
+        f"workflow whenever the user says 'run the {topic} workflow', 'walk through "
+        f"{topic} end-to-end', or hands you a multi-step {topic} task that needs "
+        f"deterministic ordering. (auto-generated from {source_kind} source; refine via "
         "/codify for best matching)"
     )
 
@@ -675,12 +706,11 @@ def _render_scaffold_markdown(
         "---",
         f"name: {skill_name}",
         f"description: {trigger_description}",
-        # Typed-contract keys. compose ships them as null placeholders so the
-        # frontmatter schema is stable; /codify replaces them with the actual
-        # input/output types from the procedure.
-        "inputs: null  # filled by /codify: {arg_name: type, ...}",
-        "outputs: null  # filled by /codify: {artifact: path | none, ...}",
-        "dependencies: null  # filled by /codify: [mcp tools, sibling skills, env vars]",
+        # Only name/description live in frontmatter, matching the official
+        # Agent Skills spec. Typed inputs/outputs/dependencies are declared
+        # in the '## Inputs' / '## Outputs' / '## Dependencies' body sections
+        # below instead (filled in by /codify) — see validate_skill's body
+        # parser, which reads the contract from there.
         "---",
         "",
         f"# {skill_name}",
@@ -812,11 +842,9 @@ def _render_agent_scaffold_markdown(
         "---",
         f"name: {agent_name}",
         f"description: {trigger_description}",
-        # Typed-contract keys for the agent's external surface. /codify
-        # replaces these placeholders with the actual delegation contract.
-        "inputs: null  # filled by /codify: {arg_name: type, ...} the user task shape",
-        "outputs: null  # filled by /codify: {artifact: path | none, ...} the delivered result",
-        "owned_skills: null  # filled by /codify: [skill_name, ...] enforced delegation set",
+        # Only name/description live in frontmatter, matching the official
+        # Agent Skills spec. The delegation contract (typed inputs/outputs,
+        # owned skills) is declared in the body sections below instead.
         "---",
         "",
         f"# {agent_name}",
@@ -964,13 +992,11 @@ def _render_workflow_scaffold_markdown(
         "---",
         f"name: {workflow_name}",
         f"description: {trigger_description}",
-        # Typed contract: workflows declare inputs and outputs at the boundary
-        # of the orchestration (what the caller hands in / gets back), plus an
-        # explicit owner_agent so dispatch knows who is accountable.
-        "inputs: null  # filled by /codify: {arg_name: type, ...}",
-        "outputs: null  # filled by /codify: {artifact: path | none, ...}",
+        # name/description plus owner_agent (the dispatch entry point some
+        # other part of the pipeline reads back) are the only frontmatter
+        # keys — matches the official Agent Skills spec otherwise. Typed
+        # inputs/outputs/rollback strategy live in the body sections below.
         f"owner_agent: {owner_agent or 'null'}  # the agent that runs this workflow",
-        "rollback_strategy: null  # filled by /codify: per-step or whole-workflow reversal",
         "---",
         "",
         f"# {workflow_name}",

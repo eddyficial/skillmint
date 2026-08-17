@@ -53,6 +53,55 @@ def test_parse_frontmatter_returns_empty_when_missing() -> None:
     assert skill_validation._parse_frontmatter(text) == {}
 
 
+# ---------------------------------------------------------------------------
+# '## Inputs' body-section parsing (canonical source since frontmatter
+# dropped inputs/outputs/dependencies to match the official Agent Skills spec)
+# ---------------------------------------------------------------------------
+
+
+def test_parse_inputs_section_reads_typed_bullets_from_body() -> None:
+    text = (
+        "---\n"
+        "name: foo-skill\n"
+        "description: Does foo.\n"
+        "---\n\n"
+        "## Inputs\n\n"
+        "- `target_path` (pathlib.Path, required): where to write the file.\n"
+        "- `greeting` (string, optional): the text to write.\n\n"
+        "## Outputs\n\n"
+        "- `artifact`: the written file.\n"
+    )
+    schema = skill_validation._parse_inputs_section(text)
+    assert schema == {
+        "target_path": "pathlib.Path, required",
+        "greeting": "string, optional",
+    }
+
+
+def test_parse_inputs_section_ignores_description_text_after_colon() -> None:
+    """A description mentioning 'local paths' must not leak a path-typed default.
+
+    The parenthetical, not the free-text description, is what's captured —
+    this is what stops a plain string arg like `source_context` from being
+    misread as a filesystem path just because its description says
+    "local paths, versions, or environment details".
+    """
+    text = (
+        "## Inputs\n\n"
+        "- `source_context` (string, optional): Extra constraints, local paths, "
+        "versions, or environment details.\n"
+    )
+    schema = skill_validation._parse_inputs_section(text)
+    assert schema == {"source_context": "string, optional"}
+    inputs = skill_validation._materialize_sample_inputs(schema)
+    assert inputs["source_context"] != "<SANDBOX>/source_context"
+
+
+def test_parse_inputs_section_returns_empty_when_missing() -> None:
+    text = "---\nname: foo\n---\n\n## How to apply\n\nDo it.\n"
+    assert skill_validation._parse_inputs_section(text) == {}
+
+
 def test_parse_success_criteria_returns_bullets_in_order() -> None:
     text = (
         "## Success criteria\n\n"
@@ -263,6 +312,63 @@ def test_validate_skill_errors_when_skill_missing(tmp_path: Path, monkeypatch) -
     monkeypatch.setenv("USERPROFILE", str(tmp_path))
     with pytest.raises(skill_validation.SkillValidationError, match="not found"):
         skill_validation.validate_skill("nonexistent-skill")
+
+
+BODY_ONLY_SKILL = """---
+name: echo-skill-v2
+description: Write a greeting to a file.
+---
+
+# echo-skill-v2
+
+## Inputs
+
+- `target_path` (pathlib.Path, required): where to write.
+- `greeting` (string, optional): the text to write.
+
+## How to apply
+1. Use Write to create `target_path` with `greeting` as the content.
+
+## Success criteria
+- The file at `target_path` exists.
+"""
+
+
+def test_validate_skill_materializes_inputs_from_body_when_frontmatter_has_none(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """No `inputs:` in frontmatter (the new normal) still yields typed sample inputs.
+
+    Confirms the fix actually preserves validate_skill's sample-input
+    generation now that SkillMint-generated skills carry only name/
+    description in frontmatter.
+    """
+    skill_dir = tmp_path / ".claude" / "skills" / "echo-skill-v2"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(BODY_ONLY_SKILL, encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    captured: dict = {}
+
+    def fake_run(prompt: str, *, cwd: str | None = None, timeout_seconds: float = 300.0, extra_args=None):
+        captured["prompt"] = prompt
+        return _claude_cli.ClaudeCliResult(
+            stdout='```json\n{"criteria":[{"name":"exists","passed":true,"evidence":"ok"}]}\n```',
+            stderr="",
+            exit_code=0,
+            wall_seconds=0.1,
+            cwd=cwd or "/tmp",
+        )
+
+    monkeypatch.setattr(_claude_cli, "run", fake_run)
+    monkeypatch.setattr(_claude_cli, "ensure_available", lambda: "/fake/claude")
+
+    result = skill_validation.validate_skill("echo-skill-v2")
+    assert result["ok"] is True
+    # target_path resolved to a real sandbox path, not left as a placeholder
+    # and not defaulted to the generic <sample-...> string.
+    assert result["sampleInputs"]["target_path"].endswith("target_path")
+    assert result["sampleInputs"]["greeting"] != "<SANDBOX>/greeting"
 
 
 def test_validate_skill_resolves_supplied_skills_root(monkeypatch, tmp_path: Path) -> None:

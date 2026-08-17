@@ -1,7 +1,8 @@
 """Validate a Skillmint-produced skill by actually executing it.
 
-Reads a saved SKILL.md, parses its YAML frontmatter (inputs/outputs/dependencies)
-and its ``## Success criteria`` block, materializes deterministic sample inputs,
+Reads a saved SKILL.md, parses its input contract from the ``## Inputs`` body
+section (falling back to a legacy ``inputs:`` frontmatter key if present) and
+its ``## Success criteria`` block, materializes deterministic sample inputs,
 spawns ``claude -p`` against the skill body in a sandbox, parses the resulting
 PASS/FAIL report, and returns a structured result.
 
@@ -78,8 +79,11 @@ def validate_skill(
             "error": "skill has no ## Success criteria block; nothing to validate",
         }
 
+    # Canonical source is the '## Inputs' body section; fall back to a
+    # legacy/hand-authored `inputs:` frontmatter key when the body has none.
+    inputs_schema = _parse_inputs_section(text) or frontmatter.get("inputs")
     inputs = sample_inputs if sample_inputs is not None else _materialize_sample_inputs(
-        frontmatter.get("inputs"),
+        inputs_schema,
     )
 
     sandbox_dir = tempfile.mkdtemp(prefix="skillmint-validate-")
@@ -123,8 +127,13 @@ def validate_skill(
 
 _FRONTMATTER_RE = re.compile(r"\A---\s*\n(.*?\n)---\s*\n", flags=re.DOTALL)
 _SUCCESS_HEADER_RE = re.compile(r"^##\s+Success criteria\s*$", flags=re.MULTILINE)
+_INPUTS_HEADER_RE = re.compile(r"^##\s+Inputs\s*$", flags=re.MULTILINE)
 _NEXT_H2_RE = re.compile(r"^##\s+\S", flags=re.MULTILINE)
 _BULLET_RE = re.compile(r"^\s*-\s+(.*\S)\s*$", flags=re.MULTILINE)
+_INPUTS_BULLET_RE = re.compile(
+    r"^\s*-\s+`(?P<name>[A-Za-z_][\w]*)`\s*\((?P<spec>[^)]*)\)\s*:",
+    flags=re.MULTILINE,
+)
 
 
 def _resolve_skill_path(skill_name: str, *, skills_root: str | Path | None = None) -> Path:
@@ -235,6 +244,32 @@ def _coerce_yaml_value(block: str) -> Any:
     if nested:
         return nested
     return stripped
+
+
+def _parse_inputs_section(text: str) -> dict[str, str]:
+    """Extract a ``{name: "type, required|optional"}`` schema from the '## Inputs' body section.
+
+    This is the canonical source for a skill's input contract. SkillMint no
+    longer emits `inputs:` in YAML frontmatter — generated SKILL.md files
+    now carry only `name`/`description` there, matching the official Agent
+    Skills spec — so validate_skill reads the same information back out of
+    the body instead. Bullets look like `` - `name` (type, required):
+    description `` ; only the parenthetical is captured and handed to
+    ``_materialize_sample_inputs``. The free-text description after the
+    colon is deliberately ignored, so a phrase like "local paths" in a
+    description can't be mistaken for a path-typed argument.
+    """
+    header_match = _INPUTS_HEADER_RE.search(text)
+    if not header_match:
+        return {}
+    body_start = header_match.end()
+    after = text[body_start:]
+    next_header = _NEXT_H2_RE.search(after)
+    body = after if not next_header else after[: next_header.start()]
+    return {
+        m.group("name"): m.group("spec").strip()
+        for m in _INPUTS_BULLET_RE.finditer(body)
+    }
 
 
 def _parse_success_criteria(text: str) -> list[str]:

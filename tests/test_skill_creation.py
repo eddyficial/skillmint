@@ -793,6 +793,65 @@ def test_codify_scaffold_deterministic_writes_completed_markdown(monkeypatch, tm
     assert "no AI provider was required" in body
 
 
+def test_codify_scaffold_deterministic_frontmatter_is_name_description_only(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """Deterministic codify emits only name/description in frontmatter.
+
+    Typed inputs move to the '## Inputs' body section with an explicit type
+    token (e.g. "(string, required)") so validate_skill's body parser can
+    still materialize sample inputs without frontmatter inputs/outputs/
+    dependencies keys.
+    """
+    monkeypatch.setenv("SKILLMINT_PLAYBOOK_DIR", str(tmp_path / "playbooks"))
+    playbook_dir = tmp_path / "playbooks" / "demo-playbook"
+    playbook_dir.mkdir(parents=True)
+    (playbook_dir / "lessons.md").write_text("# Lessons\n\nDo the concrete thing.", encoding="utf-8")
+    (playbook_dir / "lessons.json").write_text(
+        json.dumps(
+            {
+                "sections": [
+                    {
+                        "ordinal": 1,
+                        "text": "Do the concrete thing, then verify the result.",
+                        "wordCount": 8,
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    output_path = tmp_path / ".claude" / "skills" / "demo-skill" / "SKILL.md"
+    output_path.parent.mkdir(parents=True)
+    output_path.write_text(
+        "---\n"
+        "name: demo-skill\n"
+        "description: Demo.\n"
+        "---\n\n"
+        "## How to apply\n\n"
+        "_(Stub. Run /codify demo-skill.)_\n",
+        encoding="utf-8",
+    )
+
+    sc.codify_scaffold(
+        output_path,
+        playbook_name="demo-playbook",
+        skill_name="demo-skill",
+        shape="skill",
+    )
+
+    body = output_path.read_text(encoding="utf-8")
+    frontmatter = body.split("---", 2)[1]
+    assert "name:" in frontmatter
+    assert "description:" in frontmatter
+    assert "inputs" not in frontmatter
+    assert "outputs" not in frontmatter
+    assert "dependencies" not in frontmatter
+    assert "- `request` (string, required):" in body
+    assert "- `source_context` (string, optional):" in body
+
+
 def test_codify_scaffold_rejects_empty_lesson_text(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("SKILLMINT_PLAYBOOK_DIR", str(tmp_path / "playbooks"))
     playbook_dir = tmp_path / "playbooks" / "empty-playbook"
