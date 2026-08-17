@@ -1286,11 +1286,11 @@ def compose_skill_scaffold_from_playbook(
         critical_rule = (
             "The returned scaffold is NOT a complete agent. Six required "
             "sections are stubs (Inputs / Outputs / Owned skills / When to "
-            "invoke / Constraints / Error handling) and the YAML `inputs:` / "
-            "`outputs:` / `owned_skills:` keys are null placeholders. Shipping "
-            "as-is means the agent has no typed boundary, no enforced "
-            "delegation set, and no failure recovery. /codify is atomic with "
-            "compose — do not skip it, do not defer it."
+            "invoke / Constraints / Error handling), each still holding "
+            "`_(Stub...)` placeholder text. Shipping as-is means the agent "
+            "has no typed boundary, no enforced delegation set, and no "
+            "failure recovery. /codify is atomic with compose — do not skip "
+            "it, do not defer it."
         )
     else:
         next_step = (
@@ -1303,11 +1303,11 @@ def compose_skill_scaffold_from_playbook(
         critical_rule = (
             "The returned scaffold is NOT a complete skill. Six required "
             "sections are stubs (Inputs / Outputs / How to apply / Success "
-            "criteria / Failure modes / Dependencies) and the YAML `inputs:` / "
-            "`outputs:` / `dependencies:` keys are null placeholders. Shipping "
-            "as-is means the skill has no typed contract, no completion test, "
-            "and no declared failure handling. /codify is atomic with compose "
-            "— do not skip it, do not defer it."
+            "criteria / Failure modes / Dependencies), each still holding "
+            "`_(Stub...)` placeholder text. Shipping as-is means the skill "
+            "has no typed contract, no completion test, and no declared "
+            "failure handling. /codify is atomic with compose — do not skip "
+            "it, do not defer it."
         )
 
     return {
