@@ -36,6 +36,17 @@ For each source, SkillMint can produce:
 - audit ledger entry
 - local capability registry entry
 
+**`--target` always leaves a Claude Code copy behind too.** Compose and codify
+always build the canonical skill at `.claude/skills/<slug>/SKILL.md` first,
+regardless of which `--target` you asked for; `--target` then controls which
+additional, tool-specific export gets written from that canonical file
+(`.agents/skills/<slug>/SKILL.md` for Codex, `.cursor/rules/<slug>.mdc` for
+Cursor, `.windsurf/rules/<slug>.md` for Windsurf, or
+`.skillmint/exports/markdown/<slug>.md` for portable Markdown —
+`--target claude_code` just skips the extra copy since the canonical file
+already **is** the output). If you only use one of the non-Claude clients,
+expect a `.claude/` directory to show up in the project regardless.
+
 The playbook is used as the source-of-truth during generation.
 
 ## How It Works
@@ -159,7 +170,9 @@ skillmint-create "http://127.0.0.1:8123/quickstart-sop.html" `
   --require-certification
 ```
 
-Create a certified Codex skill from a YouTube video:
+Create a certified Codex skill from a YouTube video (this also writes a
+`.claude/skills/` copy alongside the `.agents/skills/` export — see
+[What It Creates](#what-it-creates)):
 
 ```powershell
 skillmint-create "<youtube-url>" `
