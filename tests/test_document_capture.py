@@ -252,6 +252,68 @@ def test_capture_documentation_site_crawls_linked_pages(monkeypatch):
     assert "other.example" not in transcript or "off-site" in transcript
 
 
+def test_capture_documentation_site_follows_links_inside_nav(monkeypatch):
+    """Sidebar/nav links must still be crawled even though <nav> is stripped from content.
+
+    Regression test: real docs sites (Docusaurus, MkDocs, ReadTheDocs, GitBook)
+    put their primary link structure inside <nav>, which _strip_noise() removes
+    before content extraction. Link discovery must happen on the raw page, not
+    the noise-stripped one, or the crawl silently degrades to just the seed page.
+    """
+    pages = {
+        "https://docs.example.com/index": """
+            <html><head><title>Widget Docs</title></head><body>
+              <nav>
+                <ul>
+                  <li><a href="/auth">Authentication</a></li>
+                  <li><a href="/limits">Rate limits</a></li>
+                </ul>
+              </nav>
+              <main>
+                <h1>Widget Docs</h1>
+                <p>Documentation home.</p>
+              </main>
+            </body></html>
+        """,
+        "https://docs.example.com/auth": """
+            <html><head><title>Authentication</title></head><body>
+              <nav><a href="/index">Home</a></nav>
+              <main><h1>Authentication</h1><p>Send an API key.</p></main>
+            </body></html>
+        """,
+        "https://docs.example.com/limits": """
+            <html><head><title>Rate limits</title></head><body>
+              <nav><a href="/index">Home</a></nav>
+              <main><h1>Rate limits</h1><p>100 requests per minute.</p></main>
+            </body></html>
+        """,
+    }
+
+    def fake_get(self, url, *args, **kwargs):
+        if url not in pages:
+            return httpx.Response(404, request=httpx.Request("GET", url))
+        return httpx.Response(
+            200,
+            content=pages[url].encode("utf-8"),
+            headers={"content-type": "text/html; charset=utf-8"},
+            request=httpx.Request("GET", url),
+        )
+
+    monkeypatch.setattr(httpx.Client, "get", fake_get)
+    result = capture_documentation_site_to_playbook(
+        url="https://docs.example.com/index",
+        name="nav-linked-docs",
+        overwrite=True,
+        max_pages=10,
+    )
+
+    assert result["ok"] is True
+    pb_dir = Path(result["directory"])
+    manifest = json.loads((pb_dir / "manifest.json").read_text())
+    # All three pages reachable only via <nav> links must have been crawled.
+    assert manifest["captureConfig"]["pagesCaptured"] == 3
+
+
 def test_capture_pdf_writes_playbook(tmp_path):
     # Build a tiny real PDF with one text page using reportlab if available;
     # else skip cleanly. pdfplumber can read what reportlab writes.

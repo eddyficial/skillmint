@@ -492,6 +492,12 @@ def capture_documentation_site_to_playbook(
             continue
 
         root = _parse_html(body)
+        # Discover links on the RAW tree before noise-stripping. Real docs
+        # sites (Docusaurus, MkDocs, ReadTheDocs, GitBook, ...) put their
+        # sidebar/nav link structure inside <nav>/<header>/<aside>, which
+        # _strip_noise() removes — extracting links from the post-strip
+        # main content instead would starve the crawl to just the seed page.
+        page_links = list(_extract_links(root, final_url))
         _strip_noise(root)
         main = _pick_main_content(root)
         markdown = _render_markdown(main)
@@ -503,7 +509,7 @@ def capture_documentation_site_to_playbook(
             {"url": final_url, "title": page_title, "sections": sections}
         )
 
-        for link in _extract_links(main, final_url):
+        for link in page_links:
             if same_origin_only and _origin(link) != seed_origin:
                 continue
             if pattern_re and not pattern_re.search(link):
